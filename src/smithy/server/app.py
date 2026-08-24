@@ -86,11 +86,7 @@ async def parse_robot(req: ParseRobotRequest) -> dict[str, Any]:
     """Parse a robot JSON and return the parsed robot."""
     try:
         robot = Robot.model_validate_json(req.robot_json)
-        return {
-            "name": robot.name,
-            "version": robot.version,
-            "step_count": len(robot.steps),
-        }
+        return robot.model_dump()
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -157,7 +153,7 @@ async def get_context(job_id: int) -> dict[str, Any]:
     """Get context variables for a job."""
     orch = get_orchestrator()
     snap = orch.context_snapshot(JobId(job_id))
-    return {"variables": snap}
+    return snap
 
 
 @app.post("/save-file")
@@ -215,7 +211,7 @@ async def step_over(job_id: int) -> dict[str, str]:
 async def debug_status(job_id: int) -> dict[str, Any]:
     """Get debug status for a job."""
     # TODO: integrate with DebugController
-    return {"paused": False, "current_step": 0}
+    return {"is_paused": False, "current_step": 0}
 
 
 def _serialize_report(report: Any) -> Any:

@@ -59,7 +59,7 @@ class TestParseRobot:
         assert resp.status_code == 200
         data = resp.json()
         assert data["name"] == "Test"
-        assert data["step_count"] == 1
+        assert len(data["steps"]) == 1
 
     @pytest.mark.asyncio
     async def test_parse_invalid_json(self) -> None:
@@ -166,7 +166,7 @@ class TestContext:
         ) as client:
             resp = await client.get("/context/999")
         assert resp.status_code == 200
-        assert resp.json() == {"variables": {}}
+        assert resp.json() == {}
 
 
 class TestDebugEndpoints:
@@ -203,4 +203,4 @@ class TestDebugEndpoints:
         ) as client:
             resp = await client.get("/debug-status/0")
         assert resp.status_code == 200
-        assert resp.json()["paused"] is False
+        assert resp.json()["is_paused"] is False
