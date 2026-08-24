@@ -46,6 +46,7 @@ ignore = ["TC001"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/smithy/core/errors.py" = ["N818"]
+"src/smithy/orchestrator/orchestrator.py" = ["N818"]
 
 [tool.mypy]
 python_version = "3.14"
