@@ -1,0 +1,37 @@
+{
+  "name": "Notepad Clicker",
+  "version": "1.0",
+  "steps": [
+    {
+      "action": "windows.process",
+      "params": {
+        "action": "start",
+        "command": "notepad.exe"
+      },
+      "outputs": {
+        "pid": "notepad_pid"
+      }
+    },
+    {
+      "action": "windows.process",
+      "params": {
+        "action": "sleep",
+        "duration_ms": 2000
+      }
+    },
+    {
+      "action": "windows.find",
+      "params": {
+        "class_name": "Notepad",
+        "output_key": "notepad_window"
+      }
+    },
+    {
+      "action": "windows.click",
+      "params": {
+        "class_name": "Notepad",
+        "name": "Файл"
+      }
+    }
+  ]
+}
