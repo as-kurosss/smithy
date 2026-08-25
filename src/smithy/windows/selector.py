@@ -123,8 +123,12 @@ class ElementSelector:
         ct_value = _parse_control_type(control_type) if control_type else None
 
         def compare(ctrl: Any, depth: int) -> bool:
-            if name is not None and ctrl.Name != name:
-                return False
+            # Name has priority — if it matches, accept the element
+            # regardless of class_name (class_name scopes the parent window,
+            # but child elements have different ClassName values).
+            if name is not None:
+                return ctrl.Name == name
+            # Without name, filter by other properties.
             if automation_id is not None and ctrl.AutomationId != automation_id:
                 return False
             if ct_value is not None and ctrl.ControlType != ct_value:
