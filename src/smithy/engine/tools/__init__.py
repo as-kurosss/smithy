@@ -7,6 +7,7 @@ import sys
 from smithy.core.registry import ToolRegistry
 from smithy.engine.tools.http import HttpTool
 
+
 def default_registry() -> ToolRegistry:
     """Create a registry pre-loaded with engine tools."""
     reg = ToolRegistry()

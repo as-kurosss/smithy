@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,9 +13,8 @@ from smithy.core.errors import ElementNotFound, PlatformError
 class ElementSelector:
     """Builder-style selector for finding Windows UI elements.
 
-    Uses ``uiautomation`` Condition combinators to build a query.
+    Uses ``uiautomation.FindControl`` with a compare function.
     """
-
     pid: int | None = None
     name: str | None = None
     automation_id: str | None = None
@@ -65,19 +65,19 @@ class ElementSelector:
         """Find the first matching element under ``root``.
 
         Args:
-            root: A ``uiautomation.UIElement`` to search under.
-            automation: A ``uiautomation.UIAutomation`` instance.
+            root: A ``uiautomation`` control to search under.
+            automation: The ``uiautomation.uiautomation`` module.
 
         Returns:
-            The first matching ``UIElement``.
+            The first matching control.
 
         Raises:
             ElementNotFound: If no element matches.
             PlatformError: If the UIA call fails.
         """
-        condition = self._build_condition(automation)
+        compare = self._build_compare()
         try:
-            element = root.find_first(13, condition)  # TreeScope::Descendants = 13
+            element = automation.FindControl(root, compare)
         except Exception as exc:
             raise PlatformError(
                 "find_first failed",
@@ -94,7 +94,7 @@ class ElementSelector:
         """Find the first matching element starting from the desktop root.
 
         Returns:
-            The first matching ``UIElement``.
+            The first matching control.
 
         Raises:
             ElementNotFound: If no element matches.
@@ -103,52 +103,37 @@ class ElementSelector:
         try:
             import uiautomation as auto
 
-            automation = auto.UIAutomation()
-            root = automation.GetRootElement()
+            root = auto.GetRootControl()
         except Exception as exc:
             raise PlatformError(
                 "UIAutomation init failed",
                 source=exc,
             ) from exc
-        return self.find_first(root, automation)
+        return self.find_first(root, auto.uiautomation)
 
-    def _build_condition(self, automation: Any) -> Any:
-        """Build a UIA condition from the set fields."""
-        try:
-            import uiautomation as auto
-        except ImportError as exc:
-            raise PlatformError(
-                "uiautomation package not installed",
-                source=exc,
-            ) from exc
+    def _build_compare(self) -> Callable[[Any, int], bool]:
+        """Build a compare function for FindControl."""
+        # Capture values for the closure
+        name = self.name
+        automation_id = self.automation_id
+        control_type = self.control_type
+        class_name = self.class_name
+        pid = self.pid
 
-        conditions: list[Any] = []
+        ct_value = _parse_control_type(control_type) if control_type else None
 
-        if self.name is not None:
-            conditions.append(auto.NamePropertyCondition(self.name))
+        def compare(ctrl: Any, depth: int) -> bool:
+            if name is not None and ctrl.Name != name:
+                return False
+            if automation_id is not None and ctrl.AutomationId != automation_id:
+                return False
+            if ct_value is not None and ctrl.ControlType != ct_value:
+                return False
+            if class_name is not None and ctrl.ClassName != class_name:
+                return False
+            return not (pid is not None and ctrl.ProcessId != pid)
 
-        if self.automation_id is not None:
-            conditions.append(auto.AutomationIdPropertyCondition(self.automation_id))
-
-        if self.control_type is not None:
-            ct_value = _parse_control_type(self.control_type)
-            if ct_value is not None:
-                conditions.append(auto.ControlTypePropertyCondition(ct_value))
-
-        if self.class_name is not None:
-            conditions.append(auto.ClassNamePropertyCondition(self.class_name))
-
-        if self.pid is not None:
-            conditions.append(auto.ProcessIdPropertyCondition(self.pid))
-
-        if not conditions:
-            return auto.TrueCondition()
-
-        # AND all conditions together
-        result = conditions[0]
-        for cond in conditions[1:]:
-            result = auto.AndCondition(result, cond)
-        return result
+        return compare
 
 
 # Control type string → integer mapping (matching Rust parse_control_type)

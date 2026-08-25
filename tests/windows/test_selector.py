@@ -48,33 +48,26 @@ class TestElementSelector:
     def test_find_first_no_match(self) -> None:
         s = ElementSelector().with_name("Nonexistent")
         mock_root = MagicMock()
-        mock_root.find_first.return_value = None
         mock_auto = MagicMock()
-        with (
-            patch.object(s, "_build_condition", return_value=MagicMock()),
-            pytest.raises(ElementNotFound),
-        ):
+        mock_auto.FindControl.return_value = None
+        with pytest.raises(ElementNotFound):
             s.find_first(mock_root, mock_auto)
 
     def test_find_first_match(self) -> None:
         s = ElementSelector().with_name("OK")
         mock_element = MagicMock()
         mock_root = MagicMock()
-        mock_root.find_first.return_value = mock_element
         mock_auto = MagicMock()
-        with patch.object(s, "_build_condition", return_value=MagicMock()):
-            result = s.find_first(mock_root, mock_auto)
-            assert result is mock_element
+        mock_auto.FindControl.return_value = mock_element
+        result = s.find_first(mock_root, mock_auto)
+        assert result is mock_element
 
     def test_find_first_uia_error(self) -> None:
         s = ElementSelector().with_name("OK")
         mock_root = MagicMock()
-        mock_root.find_first.side_effect = Exception("COM error")
         mock_auto = MagicMock()
-        with (
-            patch.object(s, "_build_condition", return_value=MagicMock()),
-            pytest.raises(PlatformError),
-        ):
+        mock_auto.FindControl.side_effect = Exception("COM error")
+        with pytest.raises(PlatformError):
             s.find_first(mock_root, mock_auto)
 
 
@@ -178,7 +171,14 @@ class TestClickTool:
 
         tool = ClickTool()
         ctx = ExecutionContext.create()
-        with pytest.raises((ElementNotFound, PlatformError)):
+        # Mock uiautomation to prevent real UIA calls
+        mock_auto = MagicMock()
+        mock_auto.GetRootControl.return_value = MagicMock()
+        mock_auto.uiautomation.FindControl.return_value = None
+        with (
+            patch.dict("sys.modules", {"uiautomation": mock_auto}),
+            pytest.raises((ElementNotFound, PlatformError)),
+        ):
             await tool.execute({}, ctx)
 
     @pytest.mark.asyncio
