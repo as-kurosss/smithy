@@ -10,3 +10,8 @@ build/
 venv/
 *.egg
 .env
+
+# Tauri / Node
+apps/smith-studio/node_modules/
+apps/smith-studio/dist/
+apps/smith-studio/src-tauri/target/
