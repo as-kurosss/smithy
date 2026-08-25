@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
@@ -179,8 +180,7 @@ async def run_debug(req: RunDebugRequest) -> dict[str, Any]:
     try:
         robot = Robot(**req.robot)
         orch = get_orchestrator()
-        # For now, submit as regular job (debug mode TODO)
-        job_id = orch.submit(robot)
+        job_id = orch.submit_debug(robot, set(req.breakpoints))
         return {"job_id": job_id.value}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -196,22 +196,30 @@ async def set_breakpoints(job_id: int, req: SetBreakpointsRequest) -> dict[str, 
 @app.post("/resume/{job_id}")
 async def resume_execution(job_id: int) -> dict[str, str]:
     """Resume a paused debug job."""
-    # TODO: integrate with DebugController
+    orch = get_orchestrator()
+    with contextlib.suppress(JobNotFound, KeyError):
+        orch.resume(JobId(job_id))
     return {"status": "resumed"}
 
 
 @app.post("/step-over/{job_id}")
 async def step_over(job_id: int) -> dict[str, str]:
     """Step over in debug mode."""
-    # TODO: integrate with DebugController
+    orch = get_orchestrator()
+    with contextlib.suppress(JobNotFound, KeyError):
+        orch.step_over(JobId(job_id))
     return {"status": "step_over"}
 
 
 @app.get("/debug-status/{job_id}")
 async def debug_status(job_id: int) -> dict[str, Any]:
     """Get debug status for a job."""
-    # TODO: integrate with DebugController
-    return {"is_paused": False, "current_step": 0}
+    orch = get_orchestrator()
+    step = orch.current_step(JobId(job_id))
+    paused = orch.is_paused(JobId(job_id))
+    if step is None and paused is None:
+        return {"current_step": 0, "is_paused": False}
+    return {"current_step": step or 0, "is_paused": paused or False}
 
 
 def _serialize_report(report: Any) -> Any:

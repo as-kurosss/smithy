@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 from smithy.core.context import ExecutionContext
 from smithy.core.errors import ToolError
 from smithy.core.registry import ToolRegistry
+from smithy.engine.debug import DebugController, StepAction
 from smithy.engine.interpolate import interpolate_value
 from smithy.engine.robot import Robot
 
@@ -51,16 +53,38 @@ class RobotExecutor:
         self._registry = registry
         self._ctx = ctx
 
-    async def execute(self, robot: Robot) -> ExecutionReport:
+    async def execute(
+        self,
+        robot: Robot,
+        debug: DebugController | None = None,
+    ) -> ExecutionReport:
         """Run all steps in the robot sequentially.
 
         If a step has ``stop_on_error=True`` and fails, execution halts.
         Step outputs are written into the context via the ``outputs`` mapping.
+        If ``debug`` is provided, checks breakpoints and pauses.
         """
         t0 = time.perf_counter()
         results: list[StepResult] = []
 
         for idx, step in enumerate(robot.steps):
+            # Debug: check breakpoints before each step
+            if debug is not None:
+                debug.update_step(idx)
+                if debug.check_step_over():
+                    results.append(
+                        StepResult(step_index=idx, action=step.action)
+                    )
+                    # Wait until resumed
+                    while debug.is_paused():
+                        await asyncio.sleep(0.05)
+                action = await debug.should_continue(idx)
+                if action == StepAction.PAUSE:
+                    results.append(
+                        StepResult(step_index=idx, action=step.action)
+                    )
+                    continue
+
             try:
                 config = interpolate_value(step.params, self._ctx)
                 output = await self._registry.execute(step.action, config, self._ctx)
