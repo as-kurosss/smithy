@@ -81,23 +81,35 @@ impl PythonServer {
 
     /// Запускает Python-сервер и ждёт, пока он будет готов.
     ///
+    /// Если сервер уже запущен на порту — переиспользует его.
+    ///
     /// # Errors
     ///
     /// Возвращает ошибку, если не удалось запустить процесс или сервер не стал готов.
     pub fn start(&self) -> Result<(), String> {
-        let python = find_python().ok_or("Python not found in PATH")?;
+        let probe = Client::builder()
+            .timeout(Duration::from_secs(2))
+            .build()
+            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
+        // Check if a server is already running on the port.
+        if let Ok(resp) = probe.get(format!("{BASE_URL}/health")).send() {
+            if resp.status().is_success() {
+                eprintln!("Python server already running on {BASE_URL}");
+                return Ok(());
+            }
+        }
+
+        // Kill any stale process on the port.
+        let _ = kill_process_on_port(9500);
+
+        let python = find_python().ok_or("Python not found in PATH")?;
         let mut child = Command::new(python)
             .args(["-m", "smithy", "--port", "9500"])
             .spawn()
             .map_err(|e| format!("Failed to start Python server: {e}"))?;
 
         // Wait for server to be ready (up to 5 seconds).
-        let probe = Client::builder()
-            .timeout(Duration::from_secs(2))
-            .build()
-            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
-
         for _ in 0..25 {
             if let Ok(resp) = probe.get(format!("{BASE_URL}/health")).send() {
                 if resp.status().is_success() {
@@ -142,4 +154,30 @@ fn find_python() -> Option<String> {
         }
     }
     None
+}
+
+/// Убить процесс, занимающий указанный порт (Windows).
+fn kill_process_on_port(port: u16) -> Result<(), String> {
+    // netstat -ano -p TCP | findstr :PORT
+    let output = Command::new("netstat")
+        .args(["-ano", "-p", "TCP"])
+        .output()
+        .map_err(|e| format!("netstat failed: {e}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let needle = format!(":{port}");
+
+    for line in stdout.lines() {
+        if line.contains(&needle) && line.contains("LISTENING") {
+            // Last column is PID.
+            if let Some(pid_str) = line.split_whitespace().last() {
+                if let Ok(pid) = pid_str.parse::<u32>() {
+                    let _ = Command::new("taskkill")
+                        .args(["/F", "/PID", &pid.to_string()])
+                        .output();
+                }
+            }
+        }
+    }
+    Ok(())
 }
