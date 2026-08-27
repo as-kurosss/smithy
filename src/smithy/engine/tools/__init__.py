@@ -24,4 +24,3 @@ def default_registry() -> ToolRegistry:
         reg.register(FindTool())
 
     return reg
-    return reg

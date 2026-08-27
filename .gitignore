@@ -11,7 +11,10 @@ venv/
 *.egg
 .env
 
-# Tauri / Node
-apps/smith-studio/node_modules/
-apps/smith-studio/dist/
-apps/smith-studio/src-tauri/target/
+# Test artifacts
+selectors.json
+selectors1.json
+test_output.txt
+
+# Smith Studio (private, paid product)
+apps/smith-studio/

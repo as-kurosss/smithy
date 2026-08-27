@@ -44,6 +44,10 @@ class ClickTool(AbstractTool):
                     "description": "Control type",
                 },
                 "class_name": {"type": "string", "description": "Window class name"},
+                "pid": {
+                    "type": "integer",
+                    "description": "Process ID filter",
+                },
                 "delay_before_ms": {"type": "integer", "minimum": 0},
                 "delay_after_ms": {"type": "integer", "minimum": 0},
             },
@@ -108,6 +112,8 @@ async def _resolve_element(
         selector.with_control_type(config["control_type"])
     if "class_name" in config:
         selector.with_class_name(config["class_name"])
+    if "pid" in config:
+        selector.with_pid(config["pid"])
 
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, selector.find_from_desktop)

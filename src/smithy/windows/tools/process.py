@@ -173,9 +173,11 @@ async def _action_stop(config: dict[str, Any]) -> dict[str, Any]:
     if pid is not None:
         await loop.run_in_executor(None, _stop_by_pid, pid)
         return {"status": "stopped", "method": "pid", "pid": pid}
-    else:
-        await loop.run_in_executor(None, _stop_by_name, name)
-        return {"status": "stopped", "method": "name", "name": name}
+
+    # name is guaranteed non-None here (checked above)
+    assert name is not None
+    await loop.run_in_executor(None, _stop_by_name, name)
+    return {"status": "stopped", "method": "name", "name": name}
 
 
 async def _action_sleep(config: dict[str, Any]) -> dict[str, Any]:

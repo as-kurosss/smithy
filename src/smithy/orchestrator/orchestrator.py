@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import logging
 from typing import Any
 
 from smithy.core.context import ExecutionContext
@@ -37,6 +38,9 @@ class JobAlreadyFinished(OrchestratorError):
         self.job_id = job_id
 
 
+logger = logging.getLogger(__name__)
+
+
 class Orchestrator:
     """Manages robot job execution lifecycle."""
 
@@ -46,7 +50,7 @@ class Orchestrator:
         self._contexts: dict[int, ExecutionContext] = {}
         self._debugs: dict[int, DebugController] = {}
         self._id_counter = itertools.count(0)
-        self._tasks: dict[int, asyncio.Task[None]] = {}  # type: ignore[type-arg]
+        self._tasks: dict[int, asyncio.Task[None]] = {}
 
     def submit(self, robot: Robot) -> JobId:
         """Submit a robot for async execution. Returns JobId."""
@@ -167,6 +171,7 @@ class Orchestrator:
             if job is not None:
                 job.status = JobStatus.CANCELLED
         except Exception:
+            logger.exception("Job %d failed with unexpected error", job_id.value)
             job = self._jobs.get(job_id.value)
             if job is not None:
                 job.status = JobStatus.FAILED

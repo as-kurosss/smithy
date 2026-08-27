@@ -127,7 +127,7 @@ class ElementSelector:
             # regardless of class_name (class_name scopes the parent window,
             # but child elements have different ClassName values).
             if name is not None:
-                return ctrl.Name == name
+                return bool(ctrl.Name == name)
             # Without name, filter by other properties.
             if automation_id is not None and ctrl.AutomationId != automation_id:
                 return False

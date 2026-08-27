@@ -16,7 +16,7 @@ class StepAction(StrEnum):
 class DebugController:
     """Shared controller linking executor loop with external API.
 
-    Thread-safe: can be shared between asyncio tasks.
+    Uses ``asyncio.Event`` for safe cross-coroutine signaling.
     """
 
     def __init__(self) -> None:
@@ -24,7 +24,6 @@ class DebugController:
         self._current_step: int = 0
         self._paused: bool = False
         self._pause_after_step: bool = False
-        self._resume_flag: bool = False
         self._resume_event: asyncio.Event = asyncio.Event()
 
     async def set_breakpoints(self, points: set[int]) -> None:
@@ -42,20 +41,23 @@ class DebugController:
     async def should_continue(self, step_index: int) -> StepAction:
         """Check if execution should continue or pause at this step.
 
-        If paused, waits for resume/step_over signal.
+        If paused, waits for resume/step_over signal via the event.
         """
-        # Already paused — check resume_flag
         if self._paused:
-            if self._resume_flag:
-                self._resume_flag = False
+            if self._resume_event.is_set():
+                self._resume_event.clear()
+                self._paused = False
                 return StepAction.EXECUTE
-            await self._wait_for_resume()
+            await self._resume_event.wait()
+            self._resume_event.clear()
+            self._paused = False
             return StepAction.PAUSE
 
-        # Check breakpoint
         if step_index in self._breakpoints:
             self._paused = True
-            await self._wait_for_resume()
+            await self._resume_event.wait()
+            self._resume_event.clear()
+            self._paused = False
             return StepAction.PAUSE
 
         return StepAction.EXECUTE
@@ -73,15 +75,12 @@ class DebugController:
         return False
 
     def continue_execution(self) -> None:
-        """Resume execution: clear pause, set resume_flag."""
-        self._resume_flag = True
-        self._paused = False
+        """Resume execution: signal the event to wake the executor."""
         self._resume_event.set()
 
     def step_over(self) -> None:
         """Resume and pause after next step."""
         self._pause_after_step = True
-        self._resume_flag = True
         self._resume_event.set()
 
     def current_step(self) -> int:
@@ -96,8 +95,8 @@ class DebugController:
         """Set pause_after_step flag."""
         self._pause_after_step = value
 
-    async def _wait_for_resume(self) -> None:
-        """Wait for resume signal via event."""
-        self._resume_event.clear()
+    async def wait_for_resume(self) -> None:
+        """Wait for resume signal from the API (resume/step_over)."""
         await self._resume_event.wait()
-        self._paused = False
+        self._resume_event.clear()
+

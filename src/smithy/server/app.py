@@ -159,18 +159,34 @@ async def get_context(job_id: int) -> dict[str, Any]:
 
 @app.post("/save-file")
 async def save_file(req: SaveFileRequest) -> dict[str, str]:
-    """Save a robot JSON file."""
-    try:
-        import json
+    """Save a robot JSON file.
 
-        # Validate it's valid JSON
+    Only allows writing to the current working directory and its subdirectories.
+    """
+    import json
+    from pathlib import Path
+
+    try:
         json.loads(req.content)
-        with open(req.path, "w", encoding="utf-8") as f:
-            f.write(req.content)
-        return {"status": "saved", "path": req.path}
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}") from exc
-    except Exception as exc:
+
+    # Path traversal protection: resolve and verify within cwd
+    target = Path(req.path).resolve()
+    cwd = Path.cwd().resolve()
+    try:
+        target.relative_to(cwd)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Path must be within working directory: {cwd}",
+        ) from exc
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(req.content, encoding="utf-8")
+        return {"status": "saved", "path": str(target)}
+    except OSError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 

@@ -1,0 +1,694 @@
+"""Hotkey-based recorders for UI element selectors.
+
+Ported from ``selector-capture/src/recorder.rs``.
+
+Modes:
+    single  — CTRL alone to capture the element under cursor.  ESC to cancel.
+    series  — automatically record every mouse click & text input;
+              Ctrl+Shift+F2 to stop.
+    record  — capture one element at a time with interactive prompts
+              for tool type and parameters; Ctrl+Shift+F2 to finish.
+
+Uses ``pynput`` for global keyboard/mouse hooks and ``pyperclip``
+for clipboard access.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import queue
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
+
+from smithy.windows.tools.selector_capture.capture import (
+    BestSelector,
+    CaptureRecord,
+    capture_at_point,
+    path_to_dicts,
+)
+from smithy.windows.tools.selector_capture.generate import (
+    FlowNode,
+    GenerateParams,
+    ToolType,
+    generate_action_config,
+    generate_nodes,
+)
+
+try:
+    from pynput import keyboard as _kb
+    from pynput import mouse as _ms
+except ImportError as exc:
+    raise ImportError(
+        "pynput is required for selector-capture recorders.  "
+        "Install it with:  pip install pynput"
+    ) from exc
+
+try:
+    import pyperclip
+except ImportError:
+    pyperclip = None
+
+logger = logging.getLogger(__name__)
+
+# ── Event models ─────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class SharedEvent:
+    """Events emitted by the shared (CTRL-based) listener."""
+
+    kind: str  # "trigger" | "escape" | "stop"
+
+
+@dataclass(frozen=True)
+class SeriesEvent:
+    """Events emitted by the series (auto-record) listener."""
+
+    kind: str  # "stop" | "mouse_down" | "input"
+
+
+_STOP_SENTINEL = object()
+
+# ── Input helpers ────────────────────────────────────────────────────────────
+
+
+def _is_modifier(key: Any) -> bool:
+    """Return ``True`` if *key* is a modifier key."""
+    return isinstance(key, (_kb.Key.ctrl_l, _kb.Key.ctrl_r,
+                            _kb.Key.shift_l, _kb.Key.shift_r,
+                            _kb.Key.alt_l, _kb.Key.alt_gr,
+                            _kb.Key.cmd, _kb.Key.cmd_l, _kb.Key.cmd_r))
+
+
+def _is_printable(key: Any) -> bool:
+    """Return ``True`` if *key* represents a printable character."""
+    if isinstance(key, _kb.Key):
+        return key in (
+            _kb.Key.space,
+            _kb.Key.enter,
+            _kb.Key.backspace,
+            _kb.Key.tab,
+        )
+    return isinstance(key, _kb.KeyCode) and key.char is not None
+
+
+# ── Listener factories ───────────────────────────────────────────────────────
+
+
+def _shared_listener(out: queue.Queue[SharedEvent]) -> _kb.Listener:
+    """Create a keyboard listener for CTRL-trigger based capture.
+
+    Events emitted:
+        * ``SharedEvent("trigger")`` — CTRL pressed and released alone.
+        * ``SharedEvent("escape")`` — ESC pressed (CTRL not held).
+        * ``SharedEvent("stop")`` — Ctrl+Shift+F2 pressed.
+
+    The listener blocks the CTRL-trigger when a non-modifier key is
+    pressed while CTRL is held (e.g. CTRL+C → no trigger).
+    """
+    ctrl_down = False
+    shift_down = False
+    blocked = False
+    last_key_was_modifier = False
+
+    def on_press(key: Any) -> None:
+        nonlocal ctrl_down, shift_down, blocked, last_key_was_modifier
+
+        # ── track modifiers ──
+        if key in (_kb.Key.ctrl_l, _kb.Key.ctrl_r):
+            ctrl_down = True
+            blocked = False
+            last_key_was_modifier = True
+            return
+        if key in (_kb.Key.shift_l, _kb.Key.shift_r):
+            shift_down = True
+            last_key_was_modifier = True
+            return
+
+        last_key_was_modifier = False
+
+        if ctrl_down and shift_down and key == _kb.Key.f2:
+            out.put(SharedEvent("stop"))
+            return
+        if ctrl_down:
+            # Non-modifier while CTRL held → combo (e.g. CTRL+C)
+            blocked = True
+            return
+        if key == _kb.Key.esc:
+            out.put(SharedEvent("escape"))
+
+    def on_release(key: Any) -> None:
+        nonlocal ctrl_down, shift_down, blocked, last_key_was_modifier
+        if key in (_kb.Key.ctrl_l, _kb.Key.ctrl_r):
+            if ctrl_down and not blocked and last_key_was_modifier:
+                out.put(SharedEvent("trigger"))
+            ctrl_down = False
+            blocked = False
+            last_key_was_modifier = False
+        elif key in (_kb.Key.shift_l, _kb.Key.shift_r):
+            shift_down = False
+            last_key_was_modifier = False
+
+    return _kb.Listener(on_press=on_press, on_release=on_release)
+
+
+def _series_listener(out: queue.Queue[SeriesEvent]) -> _kb.Listener:
+    """Create a keyboard listener for series (auto-record) mode.
+
+    Events emitted:
+        * ``SeriesEvent("stop")`` — Ctrl+Shift+F2 pressed.
+        * ``SeriesEvent("input")`` — printable key without CTRL/ALT.
+    """
+    ctrl = False
+    shift = False
+    alt = False
+
+    def on_press(key: Any) -> None:
+        nonlocal ctrl, shift, alt
+
+        if key in (_kb.Key.ctrl_l, _kb.Key.ctrl_r):
+            ctrl = True
+            return
+        if key in (_kb.Key.shift_l, _kb.Key.shift_r):
+            shift = True
+            return
+        if key in (_kb.Key.alt_l, _kb.Key.alt_gr):
+            alt = True
+            return
+
+        if ctrl and shift and key == _kb.Key.f2:
+            out.put(SeriesEvent("stop"))
+            return
+        if not ctrl and not alt and _is_printable(key):
+            out.put(SeriesEvent("input"))
+
+    def on_release(key: Any) -> None:
+        nonlocal ctrl, shift, alt
+        if key in (_kb.Key.ctrl_l, _kb.Key.ctrl_r):
+            ctrl = False
+        elif key in (_kb.Key.shift_l, _kb.Key.shift_r):
+            shift = False
+        elif key in (_kb.Key.alt_l, _kb.Key.alt_gr):
+            alt = False
+
+    return _kb.Listener(on_press=on_press, on_release=on_release)
+
+
+def _mouse_listener(out: queue.Queue[SeriesEvent]) -> _ms.Listener:
+    """Create a mouse listener for series mode.
+
+    Events emitted:
+        * ``SeriesEvent("mouse_down")`` — any mouse button pressed.
+    """
+
+    def on_click(x: int, y: int, button: _ms.Button, pressed: bool) -> None:
+        if pressed:
+            out.put(SeriesEvent("mouse_down"))
+
+    return _ms.Listener(on_click=on_click)
+
+
+class _ListenerGroup:
+    """Convenience wrapper that starts/stops multiple pynput listeners."""
+
+    def __init__(self, listeners: list[Any]) -> None:
+        self._listeners = listeners
+
+    def start(self) -> None:
+        """Start all listeners as daemon threads."""
+        for listener in self._listeners:
+            listener.daemon = True
+            listener.start()
+
+    def stop(self) -> None:
+        """Stop all listeners."""
+        for listener in self._listeners:
+            listener.stop()
+
+
+# ── Clipboard helper ─────────────────────────────────────────────────────────
+
+
+def _copy_to_clipboard(text: str) -> bool:
+    """Copy *text* to the system clipboard.
+
+    Returns ``True`` on success, ``False`` if pyperclip is unavailable
+    or the copy operation fails.
+    """
+    if pyperclip is None:
+        logger.warning("pyperclip is not installed; clipboard copy skipped")
+        return False
+    try:
+        pyperclip.copy(text)
+        return True
+    except Exception:
+        logger.exception("Clipboard write failed")
+        return False
+
+
+# ── SINGLE MODE ──────────────────────────────────────────────────────────────
+
+
+def run_single_mode(
+    output: str,
+    description: str | None = None,
+    tool_type: ToolType = ToolType.FIND,
+    output_key: str = "el_01",
+    text: str = "",
+    duration_ms: int = 1000,
+    clip: bool = False,
+) -> None:
+    """Run single-capture mode.
+
+    CTRL alone → capture element under cursor, generate config, save.
+    ESC → cancel.
+
+    Args:
+        output: Path to the output JSON file.
+        description: Optional human-readable description for the capture.
+        tool_type: Tool type for config generation.
+        output_key: Output key for the find step.
+        text: Text for ``input_text`` / ``set_text`` tools.
+        duration_ms: Duration in ms for the ``wait`` tool.
+        clip: If ``True``, copy the generated config to the clipboard.
+    """
+    logger.info("Selector Capture: Single Mode")
+    logger.info(
+        "Place cursor over a UI element and press CTRL to capture. "
+        "Press ESC to cancel."
+    )
+
+    events: queue.Queue[SharedEvent] = queue.Queue()
+    kb = _shared_listener(events)
+    _ListenerGroup([kb]).start()
+
+    logger.info("Waiting for CTRL...")
+
+    selector: BestSelector | None = None
+
+    while True:
+        try:
+            event = events.get(timeout=0.1)
+        except queue.Empty:
+            continue
+
+        if event.kind == "stop":
+            break
+        if event.kind == "escape":
+            logger.info("Cancelled.")
+            return
+        if event.kind == "trigger":
+            try:
+                from pynput.mouse import Controller as MouseCtrl
+                mouse = MouseCtrl()
+                x, y = mouse.position
+                path, sel = capture_at_point(float(x), float(y))
+                selector = sel
+                break
+            except Exception:
+                logger.exception("Capture failed")
+                continue
+
+    if selector is None:
+        logger.info("Cancelled.")
+        return
+
+    label = selector.label()
+    logger.info("Captured: %s", label)
+
+    params = GenerateParams(
+        output_key=output_key,
+        text=text,
+        duration_ms=duration_ms,
+    )
+
+    if clip:
+        find_cfg = generate_nodes(selector, ToolType.FIND, params)[0].args
+        action_cfg = generate_action_config(selector, tool_type, params)
+
+        if tool_type.generates_two_nodes or tool_type is ToolType.FIND:
+            find_json = json.dumps(find_cfg, ensure_ascii=False)
+            action_json = json.dumps(action_cfg, ensure_ascii=False)
+            clip_text = f"{find_json}\n---\n{action_json}"
+        else:
+            clip_text = json.dumps(action_cfg, ensure_ascii=False)
+
+        if _copy_to_clipboard(clip_text):
+            logger.info("Copied to clipboard (%s)", tool_type.value)
+
+    # Save to file (CaptureRecord format for backward compat).
+    record = CaptureRecord(
+        id=f"capture-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}",
+        timestamp=datetime.now(UTC).isoformat(),
+        description=description,
+        full_path=path if path else [],
+        best_selector=selector,
+    )
+    _append_capture(output, record)
+    logger.info("Saved to %s", output)
+
+
+# ── SERIES MODE ──────────────────────────────────────────────────────────────
+
+
+def run_series_mode(output: str) -> None:
+    """Run series (action recorder) mode.
+
+    Automatically records every mouse click and keyboard input.
+    Ctrl+Shift+F2 → stop and save as flow nodes.
+
+    Args:
+        output: Path to the output JSON file.
+    """
+    logger.info("Selector Capture: Series Mode")
+    logger.info("Mouse clicks -> find + click node pairs")
+    logger.info("Keyboard -> find + input_text node pairs")
+    logger.info("Press Ctrl+Shift+F2 to stop recording")
+
+    events: queue.Queue[SeriesEvent] = queue.Queue()
+    kb = _series_listener(events)
+    ms = _mouse_listener(events)
+    _ListenerGroup([kb, ms]).start()
+
+    nodes: list[FlowNode] = []
+    el_counter = 0
+    pending_input = False
+    last_selector: BestSelector | None = None
+
+    while True:
+        try:
+            event = events.get(timeout=0.1)
+        except queue.Empty:
+            continue
+
+        if event.kind == "stop":
+            # Flush pending text input before stopping.
+            if pending_input and last_selector is not None:
+                el_counter += 1
+                output_key = f"el_{el_counter:02}"
+                params = GenerateParams(output_key=output_key)
+                nodes.extend(
+                    generate_nodes(last_selector, ToolType.INPUT_TEXT, params)
+                )
+            break
+
+        if event.kind == "mouse_down":
+            # Flush pending input before handling click.
+            if pending_input and last_selector is not None:
+                el_counter += 1
+                output_key = f"el_{el_counter:02}"
+                params = GenerateParams(output_key=output_key)
+                nodes.extend(
+                    generate_nodes(last_selector, ToolType.INPUT_TEXT, params)
+                )
+            pending_input = False
+
+            try:
+                from pynput.mouse import Controller as MouseCtrl
+                mouse = MouseCtrl()
+                x, y = mouse.position
+                path, sel = capture_at_point(float(x), float(y))
+                el_counter += 1
+                output_key = f"el_{el_counter:02}"
+                params = GenerateParams(output_key=output_key)
+                path_dicts = path_to_dicts(path) if path else []
+                new_nodes = [
+                    FlowNode(tool=n.tool, args=n.args, full_path=path_dicts)
+                    for n in generate_nodes(sel, ToolType.CLICK, params)
+                ]
+                nodes.extend(new_nodes)
+                last_selector = sel
+            except Exception:
+                logger.exception(
+                    "Could not capture element at mouse position"
+                )
+
+        elif event.kind == "input":
+            pending_input = True
+
+    logger.info("Recording stopped — %d nodes generated", len(nodes))
+
+    if nodes:
+        _write_flow_output(output, nodes)
+        logger.info("Saved flow to %s", output)
+
+
+# ── RECORD MODE ──────────────────────────────────────────────────────────────
+
+
+def run_record_mode(output: str) -> None:
+    """Run interactive record mode.
+
+    CTRL → capture element → prompt for tool type and parameters → repeat.
+    ESC → discard last capture.
+    Ctrl+Shift+F2 → finish and save.
+
+    Args:
+        output: Path to the output JSON file.
+    """
+    logger.info("Selector Capture: Record Mode")
+    logger.info("Hotkeys:")
+    logger.info("  CTRL          -> capture element under cursor")
+    logger.info("  ESC           -> discard last capture")
+    logger.info("  Ctrl+Shift+F2 -> finish and save")
+
+    events: queue.Queue[SharedEvent] = queue.Queue()
+    kb = _shared_listener(events)
+    _ListenerGroup([kb]).start()
+
+    nodes: list[FlowNode] = []
+    el_counter = 0
+
+    logger.info("Ready. Press CTRL over a UI element...")
+
+    while True:
+        try:
+            event = events.get(timeout=0.1)
+        except queue.Empty:
+            continue
+
+        if event.kind == "stop":
+            break
+
+        if event.kind == "escape":
+            if not nodes:
+                logger.info("Discarded — no captures taken.")
+                return
+            # Remove the last pair of nodes (find + action).
+            removed = max(0, len(nodes) - 2)
+            count = len(nodes) - removed
+            nodes = nodes[:removed]
+            logger.info(
+                "Discarded capture #%d (%d nodes removed)",
+                el_counter,
+                count,
+            )
+            el_counter = max(0, el_counter - 1)
+            continue
+
+        if event.kind == "trigger":
+            try:
+                from pynput.mouse import Controller as MouseCtrl
+                mouse = MouseCtrl()
+                x, y = mouse.position
+                path, sel = capture_at_point(float(x), float(y))
+            except Exception:
+                logger.exception("Capture failed")
+                logger.info("[CTRL] continue...")
+                continue
+
+            el_counter += 1
+            output_key = f"el_{el_counter:02}"
+            label = sel.label()
+            extra = _extra_info(sel)
+
+            logger.info("--- Capture #%d ---", el_counter)
+            logger.info("  %s%s", label, extra)
+
+            # Prompt for tool type.
+            tool = _prompt_tool_type()
+
+            # Prompt for parameters.
+            params = GenerateParams(output_key=output_key)
+            if tool.needs_text:
+                params = GenerateParams(
+                    output_key=output_key,
+                    text=_prompt_text(),
+                )
+            if tool.needs_duration:
+                params = GenerateParams(
+                    output_key=output_key,
+                    duration_ms=_prompt_duration(),
+                )
+
+            # Generate nodes.
+            path_dicts = path_to_dicts(path) if path else []
+            new_nodes = [
+                FlowNode(tool=n.tool, args=n.args, full_path=path_dicts)
+                for n in generate_nodes(sel, tool, params)
+            ]
+            for node in new_nodes:
+                logger.info(
+                    "    -> %s: %s",
+                    node.tool,
+                    json.dumps(node.args, ensure_ascii=False),
+                )
+            nodes.extend(new_nodes)
+
+            logger.info(
+                "[CTRL] continue  [ESC] discard  [Ctrl+Shift+F2] finish..."
+            )
+
+    if not nodes:
+        logger.info("No captures taken.")
+        return
+
+    logger.info("Generated %d nodes.", len(nodes))
+    _write_flow_output(output, nodes)
+    logger.info("Saved flow to %s", output)
+
+
+# ── Interactive prompts ──────────────────────────────────────────────────────
+
+
+def _prompt_tool_type() -> ToolType:
+    """Prompt the user to choose a tool type on stdin.
+
+    Returns:
+        The selected :class:`ToolType`.
+    """
+    valid = [t.value for t in ToolType]
+    prompt = f"  -> Tool? [{'/'.join(valid)}] "
+    while True:
+        try:
+            raw = input(prompt).strip()
+        except (EOFError, KeyboardInterrupt):
+            logger.info("Input cancelled; defaulting to 'find'.")
+            return ToolType.FIND
+        try:
+            return ToolType(raw)
+        except ValueError:
+            logger.error(
+                "Unknown tool type '%s'. Valid options: %s",
+                raw,
+                ", ".join(valid),
+            )
+
+
+def _prompt_text() -> str:
+    """Prompt the user for text input (mandatory for input_text / set_text).
+
+    Returns:
+        The entered text (guaranteed non-empty).
+    """
+    while True:
+        try:
+            raw = input("  -> text: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            logger.info("Input cancelled; using empty text.")
+            return ""
+        if raw:
+            return raw
+        logger.error("Text cannot be empty.")
+
+
+def _prompt_duration() -> int:
+    """Prompt the user for a duration in milliseconds (for wait tool).
+
+    Returns:
+        The duration in ms (defaults to 1000 if the user presses Enter).
+    """
+    while True:
+        try:
+            raw = input("  -> duration_ms: [1000] ").strip()
+        except (EOFError, KeyboardInterrupt):
+            logger.info("Input cancelled; using default 1000 ms.")
+            return 1000
+        if not raw:
+            return 1000
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+        logger.error("Must be a positive integer.")
+
+
+def _extra_info(sel: BestSelector) -> str:
+    """Return extra info string for display (automation_id, class_name, etc.)."""
+    if sel.automation_id is not None:
+        return f" (automation_id: {sel.automation_id})"
+    if sel.class_name is not None:
+        return f" (class_name: {sel.class_name})"
+    if sel.control_type not in ("Custom", ""):
+        return f" (type: {sel.control_type})"
+    return ""
+
+
+# ── File I/O helpers ─────────────────────────────────────────────────────────
+
+
+def _append_capture(output: str, record: CaptureRecord) -> None:
+    """Append a single :class:`CaptureRecord` to a JSON file.
+
+    Creates the file if it does not exist, or reads the existing
+    ``CaptureOutput``-shaped JSON and appends to it.
+
+    Args:
+        output: Path to the JSON file.
+        record: The capture record to append.
+    """
+    try:
+        with open(output, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {"tool": "selector-capture", "captures": []}
+
+    data.setdefault("tool", "selector-capture")
+    data.setdefault("captures", [])
+
+    cap_dict: dict[str, Any] = {
+        "id": record.id,
+        "timestamp": record.timestamp,
+        "full_path": path_to_dicts(record.full_path),
+        "best_selector": record.best_selector.to_dict(),
+    }
+    if record.description is not None:
+        cap_dict["description"] = record.description
+
+    data["captures"].append(cap_dict)
+
+    with open(output, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, ensure_ascii=False)
+
+
+def _write_flow_output(output: str, nodes: list[FlowNode]) -> None:
+    """Write a list of :class:`FlowNode` objects as JSON to *output*.
+
+    The output shape matches the Rust ``FlowGraphOutput`` format::
+
+        {
+          "tool": "selector-capture",
+          "nodes": [ { "tool": "windows.find", "args": {...} }, ... ]
+        }
+
+    Args:
+        output: Path to the output JSON file.
+        nodes: The generated flow nodes to serialise.
+    """
+    data: dict[str, Any] = {
+        "tool": "selector-capture",
+        "nodes": [
+            {
+                "tool": node.tool,
+                "args": node.args,
+                **({"full_path": node.full_path} if node.full_path else {}),
+            }
+            for node in nodes
+        ],
+    }
+    with open(output, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=2, ensure_ascii=False)

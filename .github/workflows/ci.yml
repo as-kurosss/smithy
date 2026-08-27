@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: uv pip install --system ruff
+      - name: Ruff check
+        run: ruff check src/ tests/ examples/
+      - name: Ruff format check
+        run: ruff format --check src/ tests/ examples/
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: uv pip install --system -e ".[dev]"
+      - name: Mypy strict
+        run: mypy src/smithy --strict
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - run: uv pip install --system -e ".[dev]"
+      - name: Pytest
+        run: pytest tests/ -q

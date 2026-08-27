@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -75,9 +74,8 @@ class RobotExecutor:
                     results.append(
                         StepResult(step_index=idx, action=step.action)
                     )
-                    # Wait until resumed
-                    while debug.is_paused():
-                        await asyncio.sleep(0.05)
+                    # Wait until resumed via event
+                    await debug.wait_for_resume()
                 action = await debug.should_continue(idx)
                 if action == StepAction.PAUSE:
                     results.append(

@@ -52,7 +52,7 @@ class HttpTool(AbstractTool):
             )
 
         body = config.get("body")
-        headers = config.get("headers", {})
+        headers = config.get("headers") or {}
 
         try:
             async with httpx.AsyncClient() as client:
