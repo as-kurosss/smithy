@@ -8,14 +8,16 @@ from smithy.core.errors import (
     ToolError,
 )
 from smithy.core.tool import AbstractTool, Tool, tool
-from smithy.facade import ProcessHandle, Smithy
+from smithy.facade import ClickResult, FindResult, ProcessHandle, Smithy
 
 __version__ = "0.1.0"
 
 __all__ = [
     "AbstractTool",
     "Cancelled",
+    "ClickResult",
     "ElementNotFound",
+    "FindResult",
     "InvalidInput",
     "PlatformError",
     "ProcessHandle",

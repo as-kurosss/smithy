@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from smithy.core.context import ExecutionContext
-from smithy.core.errors import ElementNotFound, InvalidInput
+from smithy.core.errors import ElementNotFound, InvalidInput, PlatformError
 from smithy.core.tool import AbstractTool
 from smithy.windows.selector import ElementSelector
 
@@ -30,7 +31,7 @@ class FindTool(AbstractTool):
             "properties": {
                 "name": {
                     "type": "string",
-                    "description": "Element name to match",
+                    "description": "Element name to match (supports wildcards: * and ?)",
                 },
                 "automation_id": {
                     "type": "string",
@@ -52,8 +53,6 @@ class FindTool(AbstractTool):
                     "type": "string",
                     "description": "Key to store element in context",
                 },
-                "delay_before_ms": {"type": "integer", "minimum": 0},
-                "delay_after_ms": {"type": "integer", "minimum": 0},
             },
             "required": ["output_key"],
         }
@@ -67,7 +66,6 @@ class FindTool(AbstractTool):
         if not output_key:
             raise InvalidInput("Missing required parameter: output_key", param="output_key")
 
-        # Build selector from input
         selector = ElementSelector()
         if "name" in config:
             selector.with_name(config["name"])
@@ -80,23 +78,16 @@ class FindTool(AbstractTool):
         if "pid" in config:
             selector.with_pid(config["pid"])
 
-        # Find element (runs in thread executor to avoid blocking)
-        import asyncio
-
         loop = asyncio.get_running_loop()
         try:
             element = await loop.run_in_executor(None, selector.find_from_desktop)
         except ElementNotFound:
             raise
         except Exception as exc:
-            from smithy.core.errors import PlatformError
-
             raise PlatformError(
                 "Find element failed",
                 source=exc,
             ) from exc
 
-        # Store in context
         ctx.set(output_key, element)
-
         return {"status": "found"}

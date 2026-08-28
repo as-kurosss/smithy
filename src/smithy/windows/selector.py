@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -27,7 +28,12 @@ class ElementSelector:
         return self
 
     def with_name(self, name: str) -> ElementSelector:
-        """Filter by element name (exact match)."""
+        """Filter by element name.
+
+        Supports glob-style wildcards (``*`` and ``?``) via
+        :mod:`fnmatch` when the name contains ``*`` or ``?``.
+        Without wildcards the match is exact.
+        """
         self.name = name
         return self
 
@@ -121,12 +127,15 @@ class ElementSelector:
         pid = self.pid
 
         ct_value = _parse_control_type(control_type) if control_type else None
+        use_wildcard = name is not None and _has_wildcard(name)
 
         def compare(ctrl: Any, depth: int) -> bool:
             # Name has priority — if it matches, accept the element
             # regardless of class_name (class_name scopes the parent window,
             # but child elements have different ClassName values).
             if name is not None:
+                if use_wildcard:
+                    return bool(fnmatch.fnmatch(ctrl.Name, name))
                 return bool(ctrl.Name == name)
             # Without name, filter by other properties.
             if automation_id is not None and ctrl.AutomationId != automation_id:
@@ -188,3 +197,8 @@ _CONTROL_TYPE_MAP: dict[str, int] = {
 def _parse_control_type(s: str) -> int | None:
     """Parse a control type string into its numeric UIA identifier."""
     return _CONTROL_TYPE_MAP.get(s.lower())
+
+
+def _has_wildcard(s: str) -> bool:
+    """Return True if *s* contains fnmatch wildcards (``*`` or ``?``)."""
+    return "*" in s or "?" in s

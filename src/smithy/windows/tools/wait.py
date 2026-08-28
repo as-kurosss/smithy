@@ -1,0 +1,113 @@
+"""WaitTool — wait for a Windows UI element to appear."""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any
+
+from smithy.core.context import ExecutionContext
+from smithy.core.errors import ElementNotFound, InvalidInput, PlatformError
+from smithy.core.tool import AbstractTool
+from smithy.windows.selector import ElementSelector
+
+
+class WaitTool(AbstractTool):
+    """Wait for a UI element to appear by polling at a fixed interval."""
+
+    @property
+    def name(self) -> str:
+        return "windows.wait"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Waits for a Windows UI element to appear by polling "
+            "at a fixed interval until found or timeout exceeded"
+        )
+
+    def schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Element name to match (supports wildcards: * and ?)",
+                },
+                "automation_id": {
+                    "type": "string",
+                    "description": "UI Automation identifier",
+                },
+                "control_type": {
+                    "type": "string",
+                    "description": "Control type",
+                },
+                "class_name": {"type": "string", "description": "Window class name"},
+                "pid": {
+                    "type": "integer",
+                    "description": "Process ID filter",
+                },
+                "timeout_ms": {
+                    "type": "integer",
+                    "description": "Maximum wait time in milliseconds",
+                    "minimum": 1,
+                    "default": 10000,
+                },
+                "interval_ms": {
+                    "type": "integer",
+                    "description": "Polling interval in milliseconds",
+                    "minimum": 50,
+                    "default": 500,
+                },
+            },
+            "required": [],
+        }
+
+    async def execute(
+        self,
+        config: dict[str, Any],
+        ctx: ExecutionContext,
+    ) -> Any:
+        timeout_ms = config.get("timeout_ms", 10000)
+        interval_ms = config.get("interval_ms", 500)
+
+        if interval_ms < 50:
+            raise InvalidInput(
+                "interval_ms must be >= 50",
+                param="interval_ms",
+                input_value=interval_ms,
+            )
+
+        if timeout_ms < 1:
+            raise InvalidInput(
+                "timeout_ms must be >= 1",
+                param="timeout_ms",
+                input_value=timeout_ms,
+            )
+
+        selector = ElementSelector()
+        if "name" in config:
+            selector.with_name(config["name"])
+        if "automation_id" in config:
+            selector.with_automation_id(config["automation_id"])
+        if "control_type" in config:
+            selector.with_control_type(config["control_type"])
+        if "class_name" in config:
+            selector.with_class_name(config["class_name"])
+        if "pid" in config:
+            selector.with_pid(config["pid"])
+
+        deadline = asyncio.get_event_loop().time() + (timeout_ms / 1000)
+        interval = interval_ms / 1000
+        while True:
+            try:
+                await asyncio.get_running_loop().run_in_executor(
+                    None, selector.find_from_desktop
+                )
+                return True
+            except (ElementNotFound, PlatformError):
+                pass
+
+            if asyncio.get_event_loop().time() >= deadline:
+                return False
+
+            await asyncio.sleep(interval)

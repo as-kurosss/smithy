@@ -2,7 +2,6 @@
 
 Requires: pip install smithy
 """
-
 import asyncio
 
 from smithy import Smithy, tool
@@ -26,7 +25,6 @@ bot = Smithy(tools=[greet, add])
 
 
 async def main() -> None:
-    # Use custom tools via call()
     greeting = await bot.call("greet", name="Alice")
     print(greeting["message"])  # Hello, Alice!
 

@@ -1,8 +1,9 @@
-"""ProcessTool — manage Windows processes (start, stop, sleep)."""
+"""ProcessTool — manage Windows processes (start, stop)."""
 
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 from typing import Any
 
@@ -12,26 +13,23 @@ from smithy.core.tool import AbstractTool
 
 # Whitelist of allowed executables (case-insensitive).
 # cmd.exe and powershell.exe intentionally excluded (arbitrary command execution).
-_ALLOWED_COMMANDS: set[str] = {
+_ALLOWED_COMMANDS: frozenset[str] = frozenset({
     "notepad.exe",
     "calc.exe",
     "mspaint.exe",
     "explorer.exe",
     "write.exe",
     "wordpad.exe",
-}
+})
 
 
 def _is_command_allowed(cmd: str) -> bool:
     """Check if the executable is in the allowlist."""
-    import os
-
-    name = os.path.basename(cmd).lower()
-    return name in _ALLOWED_COMMANDS
+    return os.path.basename(cmd).lower() in _ALLOWED_COMMANDS
 
 
 class ProcessTool(AbstractTool):
-    """Manage Windows processes: start, stop, or sleep."""
+    """Manage Windows processes: start or stop."""
 
     @property
     def name(self) -> str:
@@ -39,13 +37,13 @@ class ProcessTool(AbstractTool):
 
     @property
     def description(self) -> str:
-        return "Manages Windows processes: start, stop, or sleep"
+        return "Manages Windows processes: start or stop"
 
     def schema(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "action": {"type": "string", "enum": ["start", "stop", "sleep"]},
+                "action": {"type": "string", "enum": ["start", "stop"]},
                 "command": {
                     "type": "string",
                     "description": "Executable path",
@@ -54,9 +52,6 @@ class ProcessTool(AbstractTool):
                 "working_dir": {"type": "string"},
                 "pid": {"type": "integer", "description": "Process ID to stop"},
                 "name": {"type": "string", "description": "Process image name to stop"},
-                "duration_ms": {"type": "integer", "minimum": 0},
-                "delay_before_ms": {"type": "integer", "minimum": 0},
-                "delay_after_ms": {"type": "integer", "minimum": 0},
             },
             "required": ["action"],
         }
@@ -68,24 +63,11 @@ class ProcessTool(AbstractTool):
     ) -> Any:
         action = config.get("action", "").lower()
 
-        # Optional delay before
-        delay_before = config.get("delay_before_ms", 0)
-        if delay_before and delay_before > 0:
-            await asyncio.sleep(delay_before / 1000)
-
         try:
             if action == "start":
-                result = await _action_start(config)
-            elif action == "stop":
-                result = await _action_stop(config)
-            elif action == "sleep":
-                result = await _action_sleep(config)
-            else:
-                raise InvalidInput(
-                    f"Unknown process action: {action}",
-                    param="action",
-                    input_value=action,
-                )
+                return await _action_start(config)
+            if action == "stop":
+                return await _action_stop(config)
         except (InvalidInput, PlatformError):
             raise
         except Exception as exc:
@@ -94,12 +76,11 @@ class ProcessTool(AbstractTool):
                 source=exc,
             ) from exc
 
-        # Optional delay after (only on success)
-        delay_after = config.get("delay_after_ms", 0)
-        if delay_after and delay_after > 0:
-            await asyncio.sleep(delay_after / 1000)
-
-        return result
+        raise InvalidInput(
+            f"Unknown process action: {action}",
+            param="action",
+            input_value=action,
+        )
 
 
 async def _action_start(config: dict[str, Any]) -> dict[str, Any]:
@@ -124,9 +105,8 @@ async def _action_start(config: dict[str, Any]) -> dict[str, Any]:
     loop = asyncio.get_running_loop()
 
     def _start() -> int:
-        cmd = [command] + args
         proc = subprocess.Popen(
-            cmd,
+            [command, *args],
             cwd=working_dir,
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
         )
@@ -148,18 +128,25 @@ async def _action_stop(config: dict[str, Any]) -> dict[str, Any]:
 
     loop = asyncio.get_running_loop()
 
-    def _stop_by_pid(pid: int) -> None:
-        result = subprocess.run(
-            ["taskkill", "/F", "/PID", str(pid)],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise PlatformError(
-                f"taskkill for pid {pid} failed: {result.stderr}",
+    if pid is not None:
+        def _stop_by_pid() -> None:
+            result = subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True,
+                text=True,
             )
+            if result.returncode != 0:
+                raise PlatformError(
+                    f"taskkill for pid {pid} failed: {result.stderr}",
+                )
 
-    def _stop_by_name(name: str) -> None:
+        await loop.run_in_executor(None, _stop_by_pid)
+        return {"status": "stopped", "method": "pid", "pid": pid}
+
+    # name is guaranteed non-None here (checked above)
+    assert name is not None  # noqa: S101 — narrowed by the if-chain above
+
+    def _stop_by_name() -> None:
         result = subprocess.run(
             ["taskkill", "/F", "/IM", name],
             capture_output=True,
@@ -170,24 +157,5 @@ async def _action_stop(config: dict[str, Any]) -> dict[str, Any]:
                 f"taskkill for {name} failed: {result.stderr}",
             )
 
-    if pid is not None:
-        await loop.run_in_executor(None, _stop_by_pid, pid)
-        return {"status": "stopped", "method": "pid", "pid": pid}
-
-    # name is guaranteed non-None here (checked above)
-    assert name is not None
-    await loop.run_in_executor(None, _stop_by_name, name)
+    await loop.run_in_executor(None, _stop_by_name)
     return {"status": "stopped", "method": "name", "name": name}
-
-
-async def _action_sleep(config: dict[str, Any]) -> dict[str, Any]:
-    """Sleep for duration_ms milliseconds."""
-    duration_ms = config.get("duration_ms")
-    if duration_ms is None:
-        raise InvalidInput(
-            "Missing 'duration_ms' for sleep action",
-            param="duration_ms",
-        )
-
-    await asyncio.sleep(duration_ms / 1000)
-    return {"status": "slept", "duration_ms": duration_ms}

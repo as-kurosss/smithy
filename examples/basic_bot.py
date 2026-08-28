@@ -2,27 +2,28 @@
 
 Requires: pip install smithy[windows]
 """
-
 import asyncio
 
 from smithy import Smithy
 from smithy.windows.tools.click import ClickTool
+from smithy.windows.tools.delay import DelayTool
 from smithy.windows.tools.find import FindTool
 from smithy.windows.tools.process import ProcessTool
+from smithy.windows.tools.wait import WaitTool
 
-bot = Smithy(tools=[ProcessTool(), FindTool(), ClickTool()])
+bot = Smithy(tools=[ProcessTool(), FindTool(), ClickTool(), WaitTool(), DelayTool()])
 
 
 async def main() -> None:
-    # Launch Notepad — returns ProcessHandle with PID
-    app = await bot.process("notepad.exe")
+    app = await bot.process_run("notepad.exe")
 
-    # Find and click UI elements — PID auto-filters to our app
-    await bot.find(app, name="Untitled - Notepad")
+    await bot.wait(app, class_name="Notepad", name="*Notepad")
     await bot.click(app, name="File")
+    await bot.delay(duration_ms=300)
     await bot.click(app, name="Save As...")
 
     print(f"Notepad launched with PID: {app.pid}")
+    await bot.process_stop(app)
 
 
 if __name__ == "__main__":
