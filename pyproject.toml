@@ -13,10 +13,12 @@ authors = [{ name = "as-kurosss" }]
 dependencies = []
 
 [project.optional-dependencies]
-windows = ["uiautomation>=2.0.29"]
+windows = ["uiautomation>=2.0.29", "mss>=9", "Pillow>=10"]
 capture = ["pynput>=1.7", "pyperclip>=1.8"]
 all = [
     "uiautomation>=2.0.29",
+    "mss>=9",
+    "Pillow>=10",
     "pynput>=1.7",
     "pyperclip>=1.8",
 ]
@@ -44,11 +46,12 @@ ignore = ["TC001", "TC003"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/smithy/core/errors.py" = ["N818"]
+"src/smithy/windows/tools/screenshot.py" = ["A002"]
 
 [tool.mypy]
 python_version = "3.14"
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["pynput.*", "pyperclip"]
+module = ["pynput.*", "pyperclip", "mss", "PIL", "PIL.*"]
 ignore_missing_imports = true

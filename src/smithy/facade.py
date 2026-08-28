@@ -214,6 +214,37 @@ class Smithy:
             "windows.delay", {"duration_ms": duration_ms}, self._ctx
         )
 
+    async def screenshot(
+        self,
+        path: str,
+        handle: _SupportsPid | None = None,
+        *,
+        pid: int | None = None,
+        image_format: str = "png",
+    ) -> dict[str, Any]:
+        """Capture a screenshot and save it to a file.
+
+        Requires ``mss`` and ``Pillow`` (included in ``smithy[windows]``).
+
+        Args:
+            path: File path to save the screenshot.
+            handle: ProcessHandle to capture that window.
+            pid: Process ID to capture that window.
+            image_format: Image format — ``"png"`` (default) or ``"jpg"``.
+
+        Returns:
+            Dict with ``"status"``, ``"path"``, and ``"format"`` keys.
+        """
+        config: dict[str, Any] = {"path": path, "format": image_format}
+        if handle is not None:
+            config["pid"] = handle.pid
+        elif pid is not None:
+            config["pid"] = pid
+        out: dict[str, Any] = await self._registry.execute(
+            "windows.screenshot", config, self._ctx
+        )
+        return out
+
     async def call(self, name: str, **kwargs: Any) -> Any:
         """Execute a tool by name. For custom and non-standard tools.
 
@@ -224,5 +255,4 @@ class Smithy:
         Returns:
             Tool execution result.
         """
-        return await self._registry.execute(name, kwargs, self._ctx)
         return await self._registry.execute(name, kwargs, self._ctx)
