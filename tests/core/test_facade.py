@@ -47,7 +47,7 @@ class ProcessStub(AbstractTool):
 
     @property
     def name(self) -> str:
-        return "process"
+        return "windows.process"
 
     @property
     def description(self) -> str:
@@ -66,7 +66,7 @@ class FindStub(AbstractTool):
 
     @property
     def name(self) -> str:
-        return "find"
+        return "windows.find"
 
     @property
     def description(self) -> str:
@@ -85,7 +85,7 @@ class ClickStub(AbstractTool):
 
     @property
     def name(self) -> str:
-        return "click"
+        return "windows.click"
 
     @property
     def description(self) -> str:
@@ -104,7 +104,7 @@ class FailFindStub(AbstractTool):
 
     @property
     def name(self) -> str:
-        return "find"
+        return "windows.find"
 
     @property
     def description(self) -> str:
@@ -156,7 +156,7 @@ class TestSmithyProcess:
     @pytest.mark.asyncio
     async def test_process_returns_handle(self) -> None:
         bot = Smithy(tools=[ProcessStub()])
-        handle = await bot.process("notepad.exe")
+        handle = await bot.process_run("notepad.exe")
         assert isinstance(handle, ProcessHandle)
         assert handle.pid == 12345
         assert handle.name == "notepad.exe"
@@ -165,7 +165,7 @@ class TestSmithyProcess:
     async def test_process_no_tool_raises(self) -> None:
         bot = Smithy()
         with pytest.raises(InvalidInput, match="not found"):
-            await bot.process("notepad.exe")
+            await bot.process_run("notepad.exe")
 
 
 class TestSmithyFind:
@@ -174,13 +174,13 @@ class TestSmithyFind:
         bot = Smithy(tools=[FindStub()])
         handle = ProcessHandle(pid=42, name="app")
         result = await bot.find(handle, name="OK")
-        assert result["status"] == "found"
+        assert result.status == "found"
 
     @pytest.mark.asyncio
     async def test_find_without_handle(self) -> None:
         bot = Smithy(tools=[FindStub()])
         result = await bot.find(name="OK")
-        assert result["status"] == "found"
+        assert result.status == "found"
 
 
 class TestSmithyClick:
@@ -189,19 +189,19 @@ class TestSmithyClick:
         bot = Smithy(tools=[ClickStub()])
         handle = ProcessHandle(pid=42, name="app")
         result = await bot.click(handle, name="OK")
-        assert result["status"] == "clicked"
+        assert result.status == "clicked"
 
     @pytest.mark.asyncio
     async def test_click_without_handle(self) -> None:
         bot = Smithy(tools=[ClickStub()])
         result = await bot.click(name="OK")
-        assert result["status"] == "clicked"
+        assert result.status == "clicked"
 
     @pytest.mark.asyncio
     async def test_click_with_element_key(self) -> None:
         bot = Smithy(tools=[ClickStub()])
         result = await bot.click(element_key="my_elem")
-        assert result["status"] == "clicked"
+        assert result.status == "clicked"
 
     @pytest.mark.asyncio
     async def test_click_pid_forwarded(self) -> None:
@@ -211,7 +211,7 @@ class TestSmithyClick:
         class CaptureClick(AbstractTool):
             @property
             def name(self) -> str:
-                return "click"
+                return "windows.click"
 
             @property
             def description(self) -> str:
@@ -239,7 +239,7 @@ class TestSmithyClick:
         class CaptureClick(AbstractTool):
             @property
             def name(self) -> str:
-                return "click"
+                return "windows.click"
 
             @property
             def description(self) -> str:

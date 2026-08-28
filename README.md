@@ -12,8 +12,26 @@ from smithy.windows.tools.find import FindTool
 from smithy.windows.tools.click import ClickTool
 from smithy.windows.tools.wait import WaitTool
 from smithy.windows.tools.delay import DelayTool
+from smithy.windows.tools.screenshot import ScreenshotTool
+from smithy.windows.tools.input_text import InputTool
+from smithy.windows.tools.set_text import SetTextTool
+from smithy.windows.tools.keyboard import KeyboardTool
+from smithy.windows.tools.get_element import GetElementTool
 
-bot = Smithy(tools=[ProcessTool(), FindTool(), ClickTool(), WaitTool(), DelayTool()])
+bot = Smithy(
+    tools=[
+        ProcessTool(),
+        FindTool(),
+        ClickTool(),
+        WaitTool(),
+        DelayTool(),
+        ScreenshotTool(),
+        InputTool(),
+        SetTextTool(),
+        KeyboardTool(),
+        GetElementTool(),
+    ]
+)
 
 
 async def main() -> None:
@@ -22,6 +40,9 @@ async def main() -> None:
     await bot.click(app, name="File")
     await bot.delay(duration_ms=300)
     await bot.click(app, name="Save As...")
+    await bot.input_text("hello world")
+    await bot.keyboard("ctrl+s")
+    await bot.screenshot("notepad.png")
     await bot.process_stop(app)
 
 
@@ -35,6 +56,11 @@ asyncio.run(main())
 - **ClickTool** (`windows.click`) — click a UI element by selector or context key
 - **WaitTool** (`windows.wait`) — poll until a UI element appears (with timeout)
 - **DelayTool** (`windows.delay`) — pause execution for a fixed duration
+- **ScreenshotTool** (`windows.screenshot`) — capture the screen or a window to a file
+- **InputTool** (`windows.input_text`) — type text into a UI element (focus + keystrokes)
+- **SetTextTool** (`windows.set_text`) — replace a UI element's value via UIA ValuePattern
+- **KeyboardTool** (`windows.keyboard`) — send key presses and combinations (e.g. `ctrl+s`)
+- **GetElementTool** (`windows.get_element`) — read a UI element's attributes as a dict
 
 All UI tools accept optional `pid` (or a `ProcessHandle`) to scope element search to a specific window.
 
@@ -137,12 +163,18 @@ src/smithy/
     ├── element.py       — SafeUIElement (thread-safe COM wrapper)
     ├── selector.py      — ElementSelector (UIA tree search)
     └── tools/
-        ├── process.py   — ProcessTool
-        ├── find.py      — FindTool
-        ├── click.py     — ClickTool
-        ├── wait.py      — WaitTool
-        ├── delay.py     — DelayTool
-        └── selector_capture/  — Dev tool for UI inspection
+        ├── process.py          — ProcessTool
+        ├── find.py             — FindTool
+        ├── click.py            — ClickTool
+        ├── wait.py             — WaitTool
+        ├── delay.py            — DelayTool
+        ├── screenshot.py       — ScreenshotTool
+        ├── input_text.py       — InputTool
+        ├── set_text.py         — SetTextTool
+        ├── keyboard.py         — KeyboardTool
+        ├── get_element.py      — GetElementTool
+        ├── _resolve.py         — Shared element resolution helper
+        └── selector_capture/   — Dev tool for UI inspection
 ```
 
 ## Examples

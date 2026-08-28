@@ -41,3 +41,50 @@ class SafeUIElement:
         """Get the element's automation ID."""
         loop = asyncio.get_running_loop()
         return str(await loop.run_in_executor(None, self._element.AutomationId))
+
+    async def get_class_name(self) -> str:
+        """Get the element's class name."""
+        loop = asyncio.get_running_loop()
+        return str(await loop.run_in_executor(None, self._element.ClassName))
+
+    async def get_pid(self) -> int:
+        """Get the owning process ID."""
+        loop = asyncio.get_running_loop()
+        return int(await loop.run_in_executor(None, self._element.ProcessId))
+
+    async def get_rect(self) -> str:
+        """Get the bounding rectangle as ``left,top,right,bottom``."""
+        loop = asyncio.get_running_loop()
+        rect = await loop.run_in_executor(None, self._element.BoundingRectangle)
+        left = getattr(rect, "left", None)
+        top = getattr(rect, "top", None)
+        right = getattr(rect, "right", None)
+        bottom = getattr(rect, "bottom", None)
+        return f"{left},{top},{right},{bottom}"
+
+    async def get_info(self) -> dict[str, Any]:
+        """Return a dict snapshot of identifying properties.
+
+        Individual ``None`` values are skipped so the result is always
+        JSON-serializable.
+        """
+        result: dict[str, Any] = {}
+        name = await self.get_name()
+        if name:
+            result["name"] = name
+        ctype = await self.get_control_type()
+        if ctype and ctype != "None":
+            result["control_type"] = ctype
+        auto_id = await self.get_automation_id()
+        if auto_id and auto_id != "None":
+            result["automation_id"] = auto_id
+        class_name = await self.get_class_name()
+        if class_name and class_name != "None":
+            result["class_name"] = class_name
+        pid = await self.get_pid()
+        if pid:
+            result["pid"] = pid
+        rect = await self.get_rect()
+        if rect and rect != "None,None,None,None":
+            result["rect"] = rect
+        return result

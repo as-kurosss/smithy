@@ -102,25 +102,6 @@ class TestProcessTool:
         assert "start" in tool.description.lower() or "process" in tool.description.lower()
 
     @pytest.mark.asyncio
-    async def test_sleep_action(self) -> None:
-        from smithy.windows.tools.process import ProcessTool
-
-        tool = ProcessTool()
-        ctx = ExecutionContext.create()
-        result = await tool.execute({"action": "sleep", "duration_ms": 10}, ctx)
-        assert result["status"] == "slept"
-        assert result["duration_ms"] == 10
-
-    @pytest.mark.asyncio
-    async def test_sleep_missing_duration(self) -> None:
-        from smithy.windows.tools.process import ProcessTool
-
-        tool = ProcessTool()
-        ctx = ExecutionContext.create()
-        with pytest.raises(InvalidInput, match="duration_ms"):
-            await tool.execute({"action": "sleep"}, ctx)
-
-    @pytest.mark.asyncio
     async def test_unknown_action(self) -> None:
         from smithy.windows.tools.process import ProcessTool
 

@@ -36,6 +36,27 @@ class ClickResult:
     status: str
 
 
+@dataclass(frozen=True)
+class InputTextResult:
+    """Result of an input_text operation."""
+
+    status: str
+
+
+@dataclass(frozen=True)
+class SetTextResult:
+    """Result of a set_text operation."""
+
+    status: str
+
+
+@dataclass(frozen=True)
+class KeyboardResult:
+    """Result of a keyboard operation."""
+
+    status: str
+
+
 class Smithy:
     """Main SDK class for creating RPA bots.
 
@@ -242,6 +263,92 @@ class Smithy:
             config["pid"] = pid
         out: dict[str, Any] = await self._registry.execute(
             "windows.screenshot", config, self._ctx
+        )
+        return out
+
+    async def input_text(
+        self,
+        text: str,
+        handle: _SupportsPid | None = None,
+        **kwargs: Any,
+    ) -> InputTextResult:
+        """Type text into a UI element (focuses it, then sends keystrokes).
+
+        Args:
+            text: Text to type.
+            handle: ProcessHandle to scope element search by PID.
+            **kwargs: ``element_key`` or selector fields (name,
+                automation_id, control_type, class_name, pid).
+
+        Returns:
+            InputTextResult.
+        """
+        if handle is not None:
+            kwargs.setdefault("pid", handle.pid)
+        result = await self._registry.execute(
+            "windows.input_text", {"text": text, **kwargs}, self._ctx
+        )
+        return InputTextResult(status=result.get("status", "typed"))
+
+    async def set_text(
+        self,
+        text: str,
+        handle: _SupportsPid | None = None,
+        **kwargs: Any,
+    ) -> SetTextResult:
+        """Replace the entire text of a UI element via UIA ValuePattern.
+
+        Args:
+            text: Text to set.
+            handle: ProcessHandle to scope element search by PID.
+            **kwargs: ``element_key`` or selector fields (name,
+                automation_id, control_type, class_name, pid).
+
+        Returns:
+            SetTextResult.
+        """
+        if handle is not None:
+            kwargs.setdefault("pid", handle.pid)
+        result = await self._registry.execute(
+            "windows.set_text", {"text": text, **kwargs}, self._ctx
+        )
+        return SetTextResult(status=result.get("status", "set"))
+
+    async def keyboard(self, keys: str) -> KeyboardResult:
+        """Send key presses and combinations to the focused window.
+
+        Args:
+            keys: Key or combination, e.g. ``"enter"``, ``"ctrl+s"``,
+                ``"alt+f4"``.
+
+        Returns:
+            KeyboardResult.
+        """
+        result = await self._registry.execute(
+            "windows.keyboard", {"keys": keys}, self._ctx
+        )
+        return KeyboardResult(status=result.get("status", "sent"))
+
+    async def get_element(
+        self,
+        handle: _SupportsPid | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Read a UI element's attributes.
+
+        Args:
+            handle: ProcessHandle to scope element search by PID.
+            **kwargs: ``element_key`` or selector fields (name,
+                automation_id, control_type, class_name, pid).
+
+        Returns:
+            Dict describing the element (name, control_type,
+            automation_id, class_name, pid, rect).
+        """
+        if handle is not None:
+            kwargs.setdefault("pid", handle.pid)
+        out: dict[str, Any] = await self._registry.execute(
+            "windows.get_element", kwargs, self._ctx
         )
         return out
 
