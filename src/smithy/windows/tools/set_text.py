@@ -2,16 +2,32 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from smithy.core.context import ExecutionContext
-from smithy.core.errors import ElementNotFound, InvalidInput
+from smithy.core.errors import ElementNotFound, InvalidInput, PlatformError
 from smithy.core.tool import AbstractTool
 from smithy.windows.tools._resolve import resolve_element
 
+# Win32 message to set text in a control.
+_WM_SETTEXT: int = 0x000C
+
+
+def _send_wm_settext(hwnd: int, text: str) -> None:
+    """Send WM_SETTEXT to a window handle via ctypes."""
+    import ctypes
+    import ctypes.wintypes
+
+    ctypes.windll.user32.SendMessageW(hwnd, _WM_SETTEXT, 0, text)
+
 
 class SetTextTool(AbstractTool):
-    """Set an element's value via the UIA ValuePattern (replaces text)."""
+    """Set a UI element's text programmatically.
+
+    Tries the UIA IValueProvider first; falls back to the Win32
+    ``WM_SETTEXT`` message for legacy controls (e.g. Notepad).
+    """
 
     @property
     def name(self) -> str:
@@ -20,7 +36,7 @@ class SetTextTool(AbstractTool):
     @property
     def description(self) -> str:
         return (
-            "Sets the text of a UI element via the UIA ValuePattern. "
+            "Sets the text of a UI element programmatically. "
             "Use to replace an input field's entire value."
         )
 
@@ -64,7 +80,29 @@ class SetTextTool(AbstractTool):
                 selector=config,
             )
 
-        # uiautomation sets the value via IValueProvider when available,
-        # and falls back to SetFocus + Ctrl+A + SendKeys otherwise.
-        element.SetValue(text)
+        loop = asyncio.get_running_loop()
+
+        # 1. Try UIA IValueProvider (WPF / UWP controls).
+        try:
+            pattern = await loop.run_in_executor(None, element.GetValuePattern)
+            if pattern is not None:
+                await loop.run_in_executor(None, pattern.SetValue, text)
+                return {"status": "set", "text": text, "method": "value_pattern"}
+        except Exception:
+            pass  # element does not support ValuePattern
+
+        # 2. Try WM_SETTEXT via the element's HWND (Win32 controls).
+        try:
+            hwnd: int | None = await loop.run_in_executor(
+                None, getattr, element, "NativeWindowHandle", None,
+            )
+            if hwnd:
+                await loop.run_in_executor(None, _send_wm_settext, hwnd, text)
+                return {"status": "set", "text": text, "method": "wm_settext"}
+        except Exception:
+            pass
+
+        raise PlatformError(
+            "Element does not support programmatic text setting",
+        )
         return {"status": "set", "text": text}
