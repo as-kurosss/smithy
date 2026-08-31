@@ -50,13 +50,6 @@ class SetTextResult:
     status: str
 
 
-@dataclass(frozen=True)
-class KeyboardResult:
-    """Result of a keyboard operation."""
-
-    status: str
-
-
 class Smithy:
     """Main SDK class for creating RPA bots.
 
@@ -273,11 +266,18 @@ class Smithy:
         text: str,
         **kwargs: Any,
     ) -> InputTextResult:
-        """Type text into a UI element (focuses it, then sends keystrokes).
+        """Type text and/or send key combinations.
+
+        Supports plain text (``"Hello"``), key combinations
+        (``"CTRL+S"``), mixed (``"Hello CTRL+S"``), and
+        SheRPA-style hold/release (``"[+CTRL]A[-CTRL]"``).
+
+        If *handle* or selector fields are provided, focuses the
+        element first.  Otherwise sends input to the focused window.
 
         Args:
             handle: ProcessHandle to scope element search by PID.
-            text: Text to type.
+            text: Text, key combination, or mixed input.
             **kwargs: ``element_key`` or selector fields (name,
                 automation_id, control_type, class_name, pid).
 
@@ -315,21 +315,6 @@ class Smithy:
             "windows.set_text", {"text": text, **kwargs}, self._ctx
         )
         return SetTextResult(status=result.get("status", "set"))
-
-    async def keyboard(self, keys: str) -> KeyboardResult:
-        """Send key presses and combinations to the focused window.
-
-        Args:
-            keys: Key or combination, e.g. ``"enter"``, ``"ctrl+s"``,
-                ``"alt+f4"``.
-
-        Returns:
-            KeyboardResult.
-        """
-        result = await self._registry.execute(
-            "windows.keyboard", {"keys": keys}, self._ctx
-        )
-        return KeyboardResult(status=result.get("status", "sent"))
 
     async def get_element(
         self,
