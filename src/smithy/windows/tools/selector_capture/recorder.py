@@ -254,8 +254,7 @@ def _copy_to_clipboard(text: str) -> bool:
 def run_single_mode(
     output: str,
     description: str | None = None,
-    tool_type: ToolType = ToolType.FIND,
-    output_key: str = "el_01",
+    tool_type: ToolType = ToolType.CLICK,
     text: str = "",
     duration_ms: int = 1000,
     clip: bool = False,
@@ -269,7 +268,6 @@ def run_single_mode(
         output: Path to the output JSON file.
         description: Optional human-readable description for the capture.
         tool_type: Tool type for config generation.
-        output_key: Output key for the find step.
         text: Text for ``input_text`` / ``set_text`` tools.
         duration_ms: Duration in ms for the ``wait`` tool.
         clip: If ``True``, copy the generated config to the clipboard.
@@ -319,21 +317,13 @@ def run_single_mode(
     logger.info("Captured: %s", label)
 
     params = GenerateParams(
-        output_key=output_key,
         text=text,
         duration_ms=duration_ms,
     )
 
     if clip:
-        find_cfg = generate_nodes(selector, ToolType.FIND, params)[0].args
         action_cfg = generate_action_config(selector, tool_type, params)
-
-        if tool_type.generates_two_nodes or tool_type is ToolType.FIND:
-            find_json = json.dumps(find_cfg, ensure_ascii=False)
-            action_json = json.dumps(action_cfg, ensure_ascii=False)
-            clip_text = f"{find_json}\n---\n{action_json}"
-        else:
-            clip_text = json.dumps(action_cfg, ensure_ascii=False)
+        clip_text = json.dumps(action_cfg, ensure_ascii=False)
 
         if _copy_to_clipboard(clip_text):
             logger.info("Copied to clipboard (%s)", tool_type.value)
@@ -363,8 +353,8 @@ def run_series_mode(output: str) -> None:
         output: Path to the output JSON file.
     """
     logger.info("Selector Capture: Series Mode")
-    logger.info("Mouse clicks -> find + click node pairs")
-    logger.info("Keyboard -> find + input_text node pairs")
+    logger.info("Mouse clicks -> click node pairs")
+    logger.info("Keyboard -> input_text node pairs")
     logger.info("Press Ctrl+Shift+F2 to stop recording")
 
     events: queue.Queue[SeriesEvent] = queue.Queue()
@@ -373,7 +363,6 @@ def run_series_mode(output: str) -> None:
     _ListenerGroup([kb, ms]).start()
 
     nodes: list[FlowNode] = []
-    el_counter = 0
     pending_input = False
     last_selector: BestSelector | None = None
 
@@ -386,9 +375,7 @@ def run_series_mode(output: str) -> None:
         if event.kind == "stop":
             # Flush pending text input before stopping.
             if pending_input and last_selector is not None:
-                el_counter += 1
-                output_key = f"el_{el_counter:02}"
-                params = GenerateParams(output_key=output_key)
+                params = GenerateParams()
                 nodes.extend(
                     generate_nodes(last_selector, ToolType.INPUT_TEXT, params)
                 )
@@ -397,9 +384,7 @@ def run_series_mode(output: str) -> None:
         if event.kind == "mouse_down":
             # Flush pending input before handling click.
             if pending_input and last_selector is not None:
-                el_counter += 1
-                output_key = f"el_{el_counter:02}"
-                params = GenerateParams(output_key=output_key)
+                params = GenerateParams()
                 nodes.extend(
                     generate_nodes(last_selector, ToolType.INPUT_TEXT, params)
                 )
@@ -410,9 +395,7 @@ def run_series_mode(output: str) -> None:
                 mouse = MouseCtrl()
                 x, y = mouse.position
                 path, sel = capture_at_point(float(x), float(y))
-                el_counter += 1
-                output_key = f"el_{el_counter:02}"
-                params = GenerateParams(output_key=output_key)
+                params = GenerateParams()
                 path_dicts = path_to_dicts(path) if path else []
                 new_nodes = [
                     FlowNode(tool=n.tool, args=n.args, full_path=path_dicts)
@@ -476,8 +459,8 @@ def run_record_mode(output: str) -> None:
             if not nodes:
                 logger.info("Discarded — no captures taken.")
                 return
-            # Remove the last pair of nodes (find + action).
-            removed = max(0, len(nodes) - 2)
+            # Remove the last node.
+            removed = max(0, len(nodes) - 1)
             count = len(nodes) - removed
             nodes = nodes[:removed]
             logger.info(
@@ -500,7 +483,6 @@ def run_record_mode(output: str) -> None:
                 continue
 
             el_counter += 1
-            output_key = f"el_{el_counter:02}"
             label = sel.label()
             extra = _extra_info(sel)
 
@@ -511,17 +493,11 @@ def run_record_mode(output: str) -> None:
             tool = _prompt_tool_type()
 
             # Prompt for parameters.
-            params = GenerateParams(output_key=output_key)
+            params = GenerateParams()
             if tool.needs_text:
-                params = GenerateParams(
-                    output_key=output_key,
-                    text=_prompt_text(),
-                )
+                params = GenerateParams(text=_prompt_text())
             if tool.needs_duration:
-                params = GenerateParams(
-                    output_key=output_key,
-                    duration_ms=_prompt_duration(),
-                )
+                params = GenerateParams(duration_ms=_prompt_duration())
 
             # Generate nodes.
             path_dicts = path_to_dicts(path) if path else []
@@ -565,8 +541,8 @@ def _prompt_tool_type() -> ToolType:
         try:
             raw = input(prompt).strip()
         except (EOFError, KeyboardInterrupt):
-            logger.info("Input cancelled; defaulting to 'find'.")
-            return ToolType.FIND
+            logger.info("Input cancelled; defaulting to 'click'.")
+            return ToolType.CLICK
         try:
             return ToolType(raw)
         except ValueError:

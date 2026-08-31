@@ -22,7 +22,7 @@ from smithy.windows.tools.selector_capture.generate import (
     FlowNode,
     GenerateParams,
     ToolType,
-    build_find_config,
+    build_inline_selector,
     generate_action_config,
     generate_nodes,
 )
@@ -302,14 +302,12 @@ class TestToolType:
     """Tests for :class:`ToolType` — enum values and string conversion."""
 
     def test_all_values(self) -> None:
-        assert ToolType.FIND == "find"
         assert ToolType.CLICK == "click"
         assert ToolType.INPUT_TEXT == "input_text"
         assert ToolType.SET_TEXT == "set_text"
         assert ToolType.WAIT == "wait"
 
     def test_from_string_valid(self) -> None:
-        assert ToolType("find") is ToolType.FIND
         assert ToolType("click") is ToolType.CLICK
         assert ToolType("input_text") is ToolType.INPUT_TEXT
         assert ToolType("set_text") is ToolType.SET_TEXT
@@ -322,42 +320,31 @@ class TestToolType:
     def test_needs_text(self) -> None:
         assert ToolType.INPUT_TEXT.needs_text is True
         assert ToolType.SET_TEXT.needs_text is True
-        assert ToolType.FIND.needs_text is False
         assert ToolType.CLICK.needs_text is False
         assert ToolType.WAIT.needs_text is False
 
     def test_needs_duration(self) -> None:
         assert ToolType.WAIT.needs_duration is True
-        assert ToolType.FIND.needs_duration is False
         assert ToolType.CLICK.needs_duration is False
 
-    def test_needs_element_key(self) -> None:
-        assert ToolType.CLICK.needs_element_key is True
-        assert ToolType.INPUT_TEXT.needs_element_key is True
-        assert ToolType.SET_TEXT.needs_element_key is True
-        assert ToolType.FIND.needs_element_key is False
-        assert ToolType.WAIT.needs_element_key is False
-
-    def test_generates_two_nodes(self) -> None:
-        assert ToolType.CLICK.generates_two_nodes is True
-        assert ToolType.INPUT_TEXT.generates_two_nodes is True
-        assert ToolType.SET_TEXT.generates_two_nodes is True
-        assert ToolType.FIND.generates_two_nodes is False
-        assert ToolType.WAIT.generates_two_nodes is False
+    def test_needs_selector(self) -> None:
+        assert ToolType.CLICK.needs_selector is True
+        assert ToolType.INPUT_TEXT.needs_selector is True
+        assert ToolType.SET_TEXT.needs_selector is True
+        assert ToolType.WAIT.needs_selector is False
 
 
 # ===================================================================
-# build_find_config
+# build_inline_selector
 # ===================================================================
 
 
-class TestBuildFindConfig:
-    """Tests for selector priority in :func:`build_find_config`."""
+class TestBuildInlineSelector:
+    """Tests for selector priority in :func:`build_inline_selector`."""
 
     def test_full_selector(self) -> None:
         sel = _sample_selector()
-        cfg = build_find_config(sel, "el_01")
-        assert cfg["output_key"] == "el_01"
+        cfg = build_inline_selector(sel)
         assert cfg["name"] == "Submit"
         assert cfg["automation_id"] == "btnSubmit"
         assert cfg["control_type"] == "Button"
@@ -370,8 +357,7 @@ class TestBuildFindConfig:
             class_name="BtnCls",
             automation_id=None,
         )
-        cfg = build_find_config(sel, "el_01")
-        assert cfg["output_key"] == "el_01"
+        cfg = build_inline_selector(sel)
         assert cfg["name"] == "Submit"
         assert cfg["control_type"] == "Button"
         assert "automation_id" not in cfg
@@ -382,28 +368,30 @@ class TestBuildFindConfig:
             name="MyElement",
             automation_id=None,
         )
-        cfg = build_find_config(sel, "el_01")
+        cfg = build_inline_selector(sel)
         assert cfg["name"] == "MyElement"
         assert "control_type" not in cfg
 
     def test_empty_control_type_excluded(self) -> None:
         sel = BestSelector(control_type="")
-        cfg = build_find_config(sel, "el_01")
+        cfg = build_inline_selector(sel)
         assert "control_type" not in cfg
 
     def test_minimal_selector(self) -> None:
         sel = BestSelector(control_type="Pane")
-        cfg = build_find_config(sel, "el_01")
-        assert cfg == {
-            "output_key": "el_01",
-            "control_type": "Pane",
-        }
+        cfg = build_inline_selector(sel)
+        assert cfg == {"control_type": "Pane"}
 
-    def test_output_key_always_present(self) -> None:
-        for ct in ("Button", "Custom", ""):
-            sel = BestSelector(control_type=ct)
-            cfg = build_find_config(sel, "k1")
-            assert cfg["output_key"] == "k1"
+    def test_with_text(self) -> None:
+        sel = _sample_selector()
+        cfg = build_inline_selector(sel, text="Hello")
+        assert cfg["text"] == "Hello"
+        assert cfg["name"] == "Submit"
+
+    def test_empty_text_omitted(self) -> None:
+        sel = _sample_selector()
+        cfg = build_inline_selector(sel)
+        assert "text" not in cfg
 
 
 # ===================================================================
@@ -414,67 +402,49 @@ class TestBuildFindConfig:
 class TestGenerateNodes:
     """Tests for :func:`generate_nodes` — one node per tool type."""
 
-    def test_find_produces_one_node(self) -> None:
+    def test_click_produces_one_node(self) -> None:
         sel = _sample_selector()
-        params = GenerateParams(output_key="el_01")
-        nodes = generate_nodes(sel, ToolType.FIND, params)
-        assert len(nodes) == 1
-        assert nodes[0].tool == "windows.find"
-        assert nodes[0].args["output_key"] == "el_01"
-
-    def test_click_produces_two_nodes(self) -> None:
-        sel = _sample_selector()
-        params = GenerateParams(output_key="el_01")
+        params = GenerateParams()
         nodes = generate_nodes(sel, ToolType.CLICK, params)
-        assert len(nodes) == 2
-        assert nodes[0].tool == "windows.find"
-        assert nodes[1].tool == "windows.click"
-        assert nodes[1].args["element_key"] == "el_01"
+        assert len(nodes) == 1
+        assert nodes[0].tool == "windows.click"
+        assert nodes[0].args["automation_id"] == "btnSubmit"
+        assert nodes[0].args["name"] == "Submit"
 
-    def test_input_text_produces_two_nodes(self) -> None:
+    def test_input_text_produces_one_node(self) -> None:
         sel = _sample_selector()
-        params = GenerateParams(output_key="el_01", text="Hello")
+        params = GenerateParams(text="Hello")
         nodes = generate_nodes(sel, ToolType.INPUT_TEXT, params)
-        assert len(nodes) == 2
-        assert nodes[0].tool == "windows.find"
-        assert nodes[1].tool == "windows.input_text"
-        assert nodes[1].args["text"] == "Hello"
-        assert nodes[1].args["element_key"] == "el_01"
+        assert len(nodes) == 1
+        assert nodes[0].tool == "windows.input_text"
+        assert nodes[0].args["text"] == "Hello"
+        assert nodes[0].args["automation_id"] == "btnSubmit"
 
-    def test_set_text_produces_two_nodes(self) -> None:
+    def test_set_text_produces_one_node(self) -> None:
         sel = _sample_selector()
-        params = GenerateParams(output_key="el_01", text="test")
+        params = GenerateParams(text="test")
         nodes = generate_nodes(sel, ToolType.SET_TEXT, params)
-        assert len(nodes) == 2
-        assert nodes[0].tool == "windows.find"
-        assert nodes[1].tool == "windows.set_text"
-        assert nodes[1].args["text"] == "test"
+        assert len(nodes) == 1
+        assert nodes[0].tool == "windows.set_text"
+        assert nodes[0].args["text"] == "test"
 
     def test_wait_produces_one_node(self) -> None:
         sel = _sample_selector()
-        params = GenerateParams(output_key="el_01", duration_ms=2000)
+        params = GenerateParams(duration_ms=2000)
         nodes = generate_nodes(sel, ToolType.WAIT, params)
         assert len(nodes) == 1
         assert nodes[0].tool == "windows.wait"
         assert nodes[0].args["duration_ms"] == 2000
 
-    def test_find_node_contains_all_selector_fields(self) -> None:
+    def test_click_node_contains_all_selector_fields(self) -> None:
         sel = _sample_selector()
-        params = GenerateParams(output_key="el_01")
-        nodes = generate_nodes(sel, ToolType.FIND, params)
+        params = GenerateParams()
+        nodes = generate_nodes(sel, ToolType.CLICK, params)
         args = nodes[0].args
         assert args["automation_id"] == "btnSubmit"
         assert args["name"] == "Submit"
         assert args["control_type"] == "Button"
         assert args["class_name"] == "ButtonClass"
-
-    def test_click_find_node_matches_click_tool_node(self) -> None:
-        """Both nodes in a click pair share the same output_key / element_key."""
-        sel = _sample_selector()
-        params = GenerateParams(output_key="el_42")
-        nodes = generate_nodes(sel, ToolType.CLICK, params)
-        assert nodes[0].args["output_key"] == "el_42"
-        assert nodes[1].args["element_key"] == "el_42"
 
 
 # ===================================================================
@@ -485,41 +455,37 @@ class TestGenerateNodes:
 class TestGenerateActionConfig:
     """Tests for :func:`generate_action_config` — action config only."""
 
-    def test_click_action_has_element_key_no_output_key(self) -> None:
+    def test_click_action_has_inline_selectors(self) -> None:
         sel = _sample_selector()
-        params = GenerateParams(output_key="el_01")
+        params = GenerateParams()
         cfg = generate_action_config(sel, ToolType.CLICK, params)
-        assert cfg["element_key"] == "el_01"
-        assert "output_key" not in cfg
-
-    def test_find_action_returns_full_config(self) -> None:
-        sel = _sample_selector()
-        params = GenerateParams(output_key="el_01")
-        cfg = generate_action_config(sel, ToolType.FIND, params)
-        assert cfg["output_key"] == "el_01"
         assert cfg["automation_id"] == "btnSubmit"
+        assert cfg["name"] == "Submit"
+        assert cfg["control_type"] == "Button"
 
     def test_input_text_action(self) -> None:
         sel = _sample_selector()
-        params = GenerateParams(output_key="el_01", text="Hello")
+        params = GenerateParams(text="Hello")
         cfg = generate_action_config(sel, ToolType.INPUT_TEXT, params)
-        assert cfg == {"text": "Hello", "element_key": "el_01"}
+        assert cfg["text"] == "Hello"
+        assert cfg["automation_id"] == "btnSubmit"
 
     def test_set_text_action(self) -> None:
         sel = _sample_selector()
-        params = GenerateParams(output_key="el_01", text="data")
+        params = GenerateParams(text="data")
         cfg = generate_action_config(sel, ToolType.SET_TEXT, params)
-        assert cfg == {"text": "data", "element_key": "el_01"}
+        assert cfg["text"] == "data"
+        assert cfg["automation_id"] == "btnSubmit"
 
     def test_wait_action(self) -> None:
         sel = _sample_selector()
-        params = GenerateParams(output_key="el_01", duration_ms=500)
+        params = GenerateParams(duration_ms=500)
         cfg = generate_action_config(sel, ToolType.WAIT, params)
         assert cfg == {"duration_ms": 500}
 
-    def test_click_action_always_omits_output_key(self) -> None:
+    def test_click_action_no_output_key(self) -> None:
         sel = BestSelector(control_type="Pane")
-        params = GenerateParams(output_key="k")
+        params = GenerateParams()
         cfg = generate_action_config(sel, ToolType.CLICK, params)
         assert "output_key" not in cfg
 
@@ -694,10 +660,10 @@ class TestFlowNodeFullPath:
     """Tests for :class:`FlowNode` full_path field."""
 
     def test_default_full_path_is_empty(self) -> None:
-        node = FlowNode(tool="windows.find", args={"output_key": "el_01"})
+        node = FlowNode(tool="windows.click", args={"name": "OK"})
         assert node.full_path == []
 
     def test_full_path_can_be_set(self) -> None:
         fp = [{"control_type": "Window", "name": "Main"}]
-        node = FlowNode(tool="windows.find", args={}, full_path=fp)
+        node = FlowNode(tool="windows.click", args={}, full_path=fp)
         assert node.full_path == fp

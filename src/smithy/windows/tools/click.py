@@ -5,11 +5,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from smithy.core.context import ExecutionContext
-from smithy.core.errors import ElementNotFound
+from smithy.core.errors import ElementNotFound, PlatformError
 from smithy.core.tool import AbstractTool
 from smithy.windows.element import SafeUIElement
-from smithy.windows.selector import ElementSelector
+from smithy.windows.tools._resolve import resolve_element
 
 
 class ClickTool(AbstractTool):
@@ -55,9 +54,8 @@ class ClickTool(AbstractTool):
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
-        element = await _resolve_element(config, ctx)
+        element = await resolve_element(config)
         if element is None:
             raise ElementNotFound(
                 "No element found: provide element_key or selector fields",
@@ -72,30 +70,3 @@ class ClickTool(AbstractTool):
 
         return {"status": "clicked"}
 
-
-async def _resolve_element(
-    config: dict[str, Any], ctx: ExecutionContext,
-) -> Any:
-    """Resolve element from context key or inline selector."""
-    element_key = config.get("element_key")
-    if element_key:
-        value = ctx.get(element_key)
-        if value is not None and isinstance(value, SafeUIElement):
-            return value
-        return value
-
-    # Build selector from inline fields
-    selector = ElementSelector()
-    if "name" in config:
-        selector.with_name(config["name"])
-    if "automation_id" in config:
-        selector.with_automation_id(config["automation_id"])
-    if "control_type" in config:
-        selector.with_control_type(config["control_type"])
-    if "class_name" in config:
-        selector.with_class_name(config["class_name"])
-    if "pid" in config:
-        selector.with_pid(config["pid"])
-
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, selector.find_from_desktop)

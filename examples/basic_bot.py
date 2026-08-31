@@ -7,11 +7,10 @@ import asyncio
 from smithy import Smithy
 from smithy.windows.tools.click import ClickTool
 from smithy.windows.tools.delay import DelayTool
-from smithy.windows.tools.find import FindTool
 from smithy.windows.tools.process import ProcessTool
 from smithy.windows.tools.wait import WaitTool
 
-bot = Smithy(tools=[ProcessTool(), FindTool(), ClickTool(), WaitTool(), DelayTool()])
+bot = Smithy(tools=[ProcessTool(), ClickTool(), WaitTool(), DelayTool()])
 
 
 async def main() -> None:

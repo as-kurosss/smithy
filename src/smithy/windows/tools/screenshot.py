@@ -8,7 +8,6 @@ import ctypes.wintypes  # noqa: PLC0415
 from pathlib import Path
 from typing import Any
 
-from smithy.core.context import ExecutionContext
 from smithy.core.errors import InvalidInput, PlatformError
 from smithy.core.tool import AbstractTool
 
@@ -58,7 +57,6 @@ class ScreenshotTool(AbstractTool):
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
         raw_path = config.get("path")
         if not raw_path:

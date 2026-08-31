@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-
-from smithy.core.context import ExecutionContext
-from smithy.windows.element import SafeUIElement
 from smithy.windows.selector import ElementSelector
 
 
@@ -30,24 +27,13 @@ def build_selector(config: dict[str, Any]) -> ElementSelector | None:
     return selector
 
 
-async def resolve_element(
-    config: dict[str, Any],
-    ctx: ExecutionContext,
-) -> Any:
-    """Resolve a UI element from ``element_key`` or inline selector fields.
+async def resolve_element(config: dict[str, Any]) -> Any:
+    """Resolve a UI element from inline selector fields.
 
     Returns:
-        A raw ``uiautomation`` control, or ``None`` if the element could
-        not be resolved via ``element_key`` and no selector fields were given.
+        A raw ``uiautomation`` control, or ``None`` if no selector
+        fields were given.
     """
-    element_key = config.get("element_key")
-    if element_key:
-        value = ctx.get(element_key)
-        if value is not None:
-            if isinstance(value, SafeUIElement):
-                return value.element
-            return value
-
     selector = build_selector(config)
     if selector is None:
         return None

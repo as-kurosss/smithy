@@ -19,14 +19,12 @@ class ToolType(enum.StrEnum):
     """Target tool type for config generation.
 
     Attributes:
-        FIND: Locate an element via selectors.
-        CLICK: Click an element found by a preceding find step.
+        CLICK: Click a UI element.
         INPUT_TEXT: Append text into an input element.
         SET_TEXT: Replace text in an input element.
         WAIT: Pause execution for a fixed duration.
     """
 
-    FIND = "find"
     CLICK = "click"
     INPUT_TEXT = "input_text"
     SET_TEXT = "set_text"
@@ -45,13 +43,8 @@ class ToolType(enum.StrEnum):
         return self is ToolType.WAIT
 
     @property
-    def needs_element_key(self) -> bool:
-        """Return ``True`` if this tool type depends on a preceding find step."""
-        return self in (ToolType.CLICK, ToolType.INPUT_TEXT, ToolType.SET_TEXT)
-
-    @property
-    def generates_two_nodes(self) -> bool:
-        """Return ``True`` if this tool produces a find + action node pair."""
+    def needs_selector(self) -> bool:
+        """Return ``True`` if this tool type targets a UI element."""
         return self in (ToolType.CLICK, ToolType.INPUT_TEXT, ToolType.SET_TEXT)
 
 
@@ -60,12 +53,10 @@ class GenerateParams:
     """Parameters for generating tool configs.
 
     Attributes:
-        output_key: Auto-generated output key for the find step.
         text: Text for ``input_text`` / ``set_text`` tools.
         duration_ms: Duration (milliseconds) for the ``wait`` tool.
     """
 
-    output_key: str
     text: str = ""
     duration_ms: int = 1000
 
@@ -94,62 +85,42 @@ def generate_nodes(
     tool: ToolType,
     params: GenerateParams,
 ) -> list[FlowNode]:
-    """Generate one or two :class:`FlowNode` objects for a captured element.
+    """Generate a :class:`FlowNode` for a captured element.
 
     Mapping:
-        * ``Find``  → ``[windows.find]``
-        * ``Click`` → ``[windows.find, windows.click]``
-        * ``InputText`` → ``[windows.find, windows.input_text]``
-        * ``SetText`` → ``[windows.find, windows.set_text]``
+        * ``Click`` → ``[windows.click]`` (inline selectors)
+        * ``InputText`` → ``[windows.input_text]`` (inline selectors)
+        * ``SetText`` → ``[windows.set_text]`` (inline selectors)
         * ``Wait`` → ``[windows.wait]``
 
     Args:
         selector: The best-effort selector captured from a UI element.
         tool: The target tool type.
-        params: Generation parameters (output key, text, duration).
+        params: Generation parameters (text, duration).
 
     Returns:
         A list of :class:`FlowNode` objects forming the tool sequence.
     """
     match tool:
-        case ToolType.FIND:
-            return [
-                FlowNode(
-                    tool="windows.find",
-                    args=build_find_config(selector, params.output_key),
-                ),
-            ]
         case ToolType.CLICK:
             return [
                 FlowNode(
-                    tool="windows.find",
-                    args=build_find_config(selector, params.output_key),
-                ),
-                FlowNode(
                     tool="windows.click",
-                    args=build_click_config(params.output_key),
+                    args=build_inline_selector(selector),
                 ),
             ]
         case ToolType.INPUT_TEXT:
             return [
                 FlowNode(
-                    tool="windows.find",
-                    args=build_find_config(selector, params.output_key),
-                ),
-                FlowNode(
                     tool="windows.input_text",
-                    args=build_text_config(params.text, params.output_key),
+                    args=build_inline_selector(selector, text=params.text),
                 ),
             ]
         case ToolType.SET_TEXT:
             return [
                 FlowNode(
-                    tool="windows.find",
-                    args=build_find_config(selector, params.output_key),
-                ),
-                FlowNode(
                     tool="windows.set_text",
-                    args=build_text_config(params.text, params.output_key),
+                    args=build_inline_selector(selector, text=params.text),
                 ),
             ]
         case ToolType.WAIT:
@@ -166,25 +137,21 @@ def generate_action_config(
     tool: ToolType,
     params: GenerateParams,
 ) -> Mapping[str, object]:
-    """Generate **only** the action config for clipboard use (without the find prefix).
-
-    Used by *single --clip* mode where find + click are separated by ``---``.
+    """Generate the action config for clipboard use.
 
     Args:
-        selector: The best-effort selector (used by ``Find`` tool type only).
+        selector: The best-effort selector (used by element-targeting tools).
         tool: The target tool type.
         params: Generation parameters.
 
     Returns:
-        A configuration dictionary for the action step only.
+        A configuration dictionary for the action step.
     """
     match tool:
-        case ToolType.FIND:
-            return build_find_config(selector, params.output_key)
         case ToolType.CLICK:
-            return build_click_config(params.output_key)
+            return build_inline_selector(selector)
         case ToolType.INPUT_TEXT | ToolType.SET_TEXT:
-            return build_text_config(params.text, params.output_key)
+            return build_inline_selector(selector, text=params.text)
         case ToolType.WAIT:
             return build_wait_config(params.duration_ms)
 
@@ -194,8 +161,12 @@ def generate_action_config(
 # ---------------------------------------------------------------------------
 
 
-def build_find_config(selector: BestSelector, output_key: str) -> dict[str, object]:  # noqa: E501
-    """Build a ``windows.find`` config from a captured selector.
+def build_inline_selector(
+    selector: BestSelector,
+    *,
+    text: str = "",
+) -> dict[str, object]:
+    """Build a config with inline selector fields for a UI tool.
 
     Selector priority:
         1. ``automation_id`` — most stable, use as the primary field.
@@ -206,12 +177,12 @@ def build_find_config(selector: BestSelector, output_key: str) -> dict[str, obje
 
     Args:
         selector: The best-effort selector for a UI element.
-        output_key: Key under which the found element will be stored.
+        text: Optional text parameter (for input_text / set_text).
 
     Returns:
-        A configuration dictionary suitable for ``windows.find``.
+        A configuration dictionary with inline selector fields.
     """
-    config: dict[str, object] = {"output_key": output_key}
+    config: dict[str, object] = {}
 
     if selector.automation_id:
         config["automation_id"] = selector.automation_id
@@ -225,35 +196,10 @@ def build_find_config(selector: BestSelector, output_key: str) -> dict[str, obje
     if selector.class_name:
         config["class_name"] = selector.class_name
 
+    if text:
+        config["text"] = text
+
     return config
-
-
-def build_click_config(element_key: str) -> dict[str, str]:
-    """Build a ``windows.click`` config referencing a previously found element.
-
-    Args:
-        element_key: The context key storing the target element.
-
-    Returns:
-        A configuration dictionary for ``windows.click``.
-    """
-    return {"element_key": element_key}
-
-
-def build_text_config(text: str, element_key: str) -> dict[str, str]:
-    """Build a config for ``windows.input_text`` or ``windows.set_text``.
-
-    Both tools support ``element_key`` to reference a previously found element,
-    as well as inline selector fields.
-
-    Args:
-        text: The text to type or set.
-        element_key: The context key storing the target element.
-
-    Returns:
-        A configuration dictionary for a text-action tool.
-    """
-    return {"text": text, "element_key": element_key}
 
 
 def build_wait_config(duration_ms: int) -> dict[str, int]:

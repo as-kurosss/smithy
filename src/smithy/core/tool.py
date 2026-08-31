@@ -7,7 +7,6 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any, Protocol, runtime_checkable
 
-from smithy.core.context import ExecutionContext
 
 
 @runtime_checkable
@@ -35,10 +34,8 @@ class Tool(Protocol):
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
         """Execute the tool with JSON-serialized parameters.
-
         Returns JSON-serializable output on success.
         Raises ToolError on failure.
         """
@@ -63,7 +60,6 @@ class AbstractTool(ABC):
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any: ...
 
 
@@ -76,7 +72,7 @@ def tool(
     Usage::
 
         @tool("greet", description="Greet a person")
-        async def greet(config: dict, ctx: ExecutionContext) -> dict:
+        async def greet(config: dict) -> dict:
             name = config.get("name", "World")
             return {"message": f"Hello, {name}!"}
 
@@ -107,9 +103,8 @@ def tool(
             async def execute(
                 self,
                 config: dict[str, Any],
-                ctx: ExecutionContext,
             ) -> Any:
-                return await fn(config, ctx)
+                return await fn(config)
 
         return _DecoratedTool()
 

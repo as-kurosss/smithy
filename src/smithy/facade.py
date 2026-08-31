@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from smithy.core.context import ExecutionContext
+from smithy.core.events import EventBus, ToolEvent
 from smithy.core.registry import ToolRegistry
 from smithy.core.tool import Tool
 
@@ -20,13 +21,6 @@ class ProcessHandle:
 
     pid: int
     name: str
-
-
-@dataclass(frozen=True)
-class FindResult:
-    """Result of a find operation."""
-
-    status: str
 
 
 @dataclass(frozen=True)
@@ -55,7 +49,7 @@ class Smithy:
 
     Usage::
 
-        bot = Smithy(tools=[ClickTool(), FindTool()])
+        bot = Smithy(tools=[ClickTool()])
         app = await bot.process_run("notepad.exe")
         await bot.click(app, name="File")
         await bot.process_stop(app)
@@ -63,19 +57,45 @@ class Smithy:
 
     def __init__(self, *, tools: list[Tool] | None = None) -> None:
         self._registry = ToolRegistry()
-        self._ctx = ExecutionContext.create()
+        self._event_bus = EventBus()
         if tools:
             for t in tools:
                 self._registry.register(t)
 
-    @property
-    def ctx(self) -> ExecutionContext:
-        """Access the underlying execution context."""
-        return self._ctx
-
     def register(self, tool: Tool) -> None:
         """Register a tool for use by this bot."""
         self._registry.register(tool)
+
+    def add_middleware(self, middleware: Any) -> None:
+        """Add a middleware to the event pipeline.
+
+        Args:
+            middleware: An async callable that receives a ToolEvent
+                and returns a ToolEvent or None to stop propagation.
+        """
+        self._event_bus.add_middleware(middleware)
+
+    async def _execute(self, tool_name: str, config: dict[str, Any]) -> Any:
+        """Execute a tool, capture timing, and emit event through middleware."""
+        start = time.perf_counter()
+        error: Exception | None = None
+        result: Any = None
+        try:
+            result = await self._registry.execute(tool_name, config)
+        except Exception as exc:
+            error = exc
+            raise
+        finally:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            event = ToolEvent(
+                tool_name=tool_name,
+                config=config,
+                result=result,
+                error=error,
+                duration_ms=elapsed_ms,
+            )
+            await self._event_bus.emit(event)
+        return result
 
     async def process_run(self, command: str, **kwargs: Any) -> ProcessHandle:
         """Launch a process and return a handle with PID.
@@ -87,8 +107,8 @@ class Smithy:
         Returns:
             ProcessHandle with pid and name for filtering UIA elements.
         """
-        result = await self._registry.execute(
-            "windows.process", {"action": "start", "command": command, **kwargs}, self._ctx
+        result = await self._execute(
+            "windows.process", {"action": "start", "command": command, **kwargs}
         )
         return ProcessHandle(pid=result["pid"], name=command)
 
@@ -113,39 +133,20 @@ class Smithy:
         """
         result: dict[str, Any]
         if handle is not None:
-            result = await self._registry.execute(
-                "windows.process", {"action": "stop", "pid": handle.pid}, self._ctx
+            result = await self._execute(
+                "windows.process", {"action": "stop", "pid": handle.pid}
             )
         elif pid is not None:
-            result = await self._registry.execute(
-                "windows.process", {"action": "stop", "pid": pid}, self._ctx
+            result = await self._execute(
+                "windows.process", {"action": "stop", "pid": pid}
             )
         elif name is not None:
-            result = await self._registry.execute(
-                "windows.process", {"action": "stop", "name": name}, self._ctx
+            result = await self._execute(
+                "windows.process", {"action": "stop", "name": name}
             )
         else:
             raise ValueError("Provide handle, pid, or name")
         return result
-
-    async def find(
-        self,
-        handle: _SupportsPid | None = None,
-        **kwargs: Any,
-    ) -> FindResult:
-        """Find a Windows UI element.
-
-        Args:
-            handle: ProcessHandle to filter by PID. If None, searches all windows.
-            **kwargs: Selector fields (name, automation_id, control_type, etc.).
-
-        Returns:
-            FindResult.
-        """
-        if handle is not None:
-            kwargs.setdefault("pid", handle.pid)
-        result = await self._registry.execute("windows.find", kwargs, self._ctx)
-        return FindResult(status=result.get("status", "found"))
 
     async def click(
         self,
@@ -167,7 +168,7 @@ class Smithy:
         """
         if handle is not None:
             kwargs.setdefault("pid", handle.pid)
-        result = await self._registry.execute("windows.click", kwargs, self._ctx)
+        result = await self._execute("windows.click", kwargs)
         return ClickResult(status=result.get("status", "clicked"))
 
     async def wait(
@@ -215,7 +216,7 @@ class Smithy:
             config["pid"] = pid
         config["timeout_ms"] = timeout_ms
         config["interval_ms"] = interval_ms
-        result = await self._registry.execute("windows.wait", config, self._ctx)
+        result = await self._execute("windows.wait", config)
         return bool(result)
 
     async def delay(self, duration_ms: int) -> None:
@@ -224,8 +225,8 @@ class Smithy:
         Args:
             duration_ms: Delay duration in milliseconds.
         """
-        await self._registry.execute(
-            "windows.delay", {"duration_ms": duration_ms}, self._ctx
+        await self._execute(
+            "windows.delay", {"duration_ms": duration_ms}
         )
 
     async def screenshot(
@@ -254,8 +255,8 @@ class Smithy:
             config["pid"] = handle.pid
         elif pid is not None:
             config["pid"] = pid
-        out: dict[str, Any] = await self._registry.execute(
-            "windows.screenshot", config, self._ctx
+        out: dict[str, Any] = await self._execute(
+            "windows.screenshot", config
         )
         return out
 
@@ -266,18 +267,14 @@ class Smithy:
         text: str,
         **kwargs: Any,
     ) -> InputTextResult:
-        """Type text and/or send key combinations.
-
-        Supports plain text (``"Hello"``), key combinations
-        (``"CTRL+S"``), mixed (``"Hello CTRL+S"``), and
-        SheRPA-style hold/release (``"[+CTRL]A[-CTRL]"``).
+        """Type plain text into a UI element or the focused window.
 
         If *handle* or selector fields are provided, focuses the
-        element first.  Otherwise sends input to the focused window.
+        element first.  Otherwise types into the focused window.
 
         Args:
             handle: ProcessHandle to scope element search by PID.
-            text: Text, key combination, or mixed input.
+            text: Plain text to type.
             **kwargs: ``element_key`` or selector fields (name,
                 automation_id, control_type, class_name, pid).
 
@@ -286,10 +283,41 @@ class Smithy:
         """
         if handle is not None:
             kwargs.setdefault("pid", handle.pid)
-        result = await self._registry.execute(
-            "windows.input_text", {"text": text, **kwargs}, self._ctx
+        result = await self._execute(
+            "windows.input_text", {"text": text, **kwargs}
         )
         return InputTextResult(status=result.get("status", "typed"))
+
+    async def keyboard(
+        self,
+        handle: _SupportsPid | None = None,
+        *,
+        keys: str,
+        **kwargs: Any,
+    ) -> InputTextResult:
+        """Send key combinations and key presses.
+
+        Bracketed tokens are key events; everything else is plain text.
+        ``[CTRL]S`` — hold Ctrl, type S.  ``[CTRL!]S`` — tap Ctrl, type S.
+
+        If *handle* or selector fields are provided, focuses the
+        element first.  Otherwise sends keys to the focused window.
+
+        Args:
+            handle: ProcessHandle to scope element search by PID.
+            keys: Key presses with bracket syntax.
+            **kwargs: ``element_key`` or selector fields (name,
+                automation_id, control_type, class_name, pid).
+
+        Returns:
+            InputTextResult.
+        """
+        if handle is not None:
+            kwargs.setdefault("pid", handle.pid)
+        result = await self._execute(
+            "windows.keyboard", {"keys": keys, **kwargs}
+        )
+        return InputTextResult(status=result.get("status", "sent"))
 
     async def set_text(
         self,
@@ -311,8 +339,8 @@ class Smithy:
         """
         if handle is not None:
             kwargs.setdefault("pid", handle.pid)
-        result = await self._registry.execute(
-            "windows.set_text", {"text": text, **kwargs}, self._ctx
+        result = await self._execute(
+            "windows.set_text", {"text": text, **kwargs}
         )
         return SetTextResult(status=result.get("status", "set"))
 
@@ -334,8 +362,8 @@ class Smithy:
         """
         if handle is not None:
             kwargs.setdefault("pid", handle.pid)
-        out: dict[str, Any] = await self._registry.execute(
-            "windows.get_element", kwargs, self._ctx
+        out: dict[str, Any] = await self._execute(
+            "windows.get_element", kwargs
         )
         return out
 
@@ -349,4 +377,4 @@ class Smithy:
         Returns:
             Tool execution result.
         """
-        return await self._registry.execute(name, kwargs, self._ctx)
+        return await self._execute(name, kwargs)

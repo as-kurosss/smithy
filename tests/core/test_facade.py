@@ -7,7 +7,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from smithy.core.context import ExecutionContext
 from smithy.core.errors import InvalidInput
 from smithy.core.tool import AbstractTool
 from smithy.facade import ProcessHandle, Smithy
@@ -37,7 +36,6 @@ class StubTool(AbstractTool):
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
         return self._output
 
@@ -56,28 +54,8 @@ class ProcessStub(AbstractTool):
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
         return {"status": "started", "pid": 12345}
-
-
-class FindStub(AbstractTool):
-    """Stub for windows.find tool."""
-
-    @property
-    def name(self) -> str:
-        return "windows.find"
-
-    @property
-    def description(self) -> str:
-        return "Find stub."
-
-    async def execute(
-        self,
-        config: dict[str, Any],
-        ctx: ExecutionContext,
-    ) -> Any:
-        return {"status": "found", "element": MagicMock()}
 
 
 class ClickStub(AbstractTool):
@@ -94,28 +72,8 @@ class ClickStub(AbstractTool):
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
         return {"status": "clicked"}
-
-
-class FailFindStub(AbstractTool):
-    """Stub that returns no element."""
-
-    @property
-    def name(self) -> str:
-        return "windows.find"
-
-    @property
-    def description(self) -> str:
-        return "Fail find."
-
-    async def execute(
-        self,
-        config: dict[str, Any],
-        ctx: ExecutionContext,
-    ) -> Any:
-        return {"status": "not_found"}
 
 
 # --- Tests ---
@@ -147,10 +105,6 @@ class TestSmithyInit:
         bot.register(StubTool(tool_name="x"))
         assert bot._registry.get("x") is not None
 
-    def test_ctx_property(self) -> None:
-        bot = Smithy()
-        assert isinstance(bot.ctx, ExecutionContext)
-
 
 class TestSmithyProcess:
     @pytest.mark.asyncio
@@ -166,21 +120,6 @@ class TestSmithyProcess:
         bot = Smithy()
         with pytest.raises(InvalidInput, match="not found"):
             await bot.process_run("notepad.exe")
-
-
-class TestSmithyFind:
-    @pytest.mark.asyncio
-    async def test_find_with_handle(self) -> None:
-        bot = Smithy(tools=[FindStub()])
-        handle = ProcessHandle(pid=42, name="app")
-        result = await bot.find(handle, name="OK")
-        assert result.status == "found"
-
-    @pytest.mark.asyncio
-    async def test_find_without_handle(self) -> None:
-        bot = Smithy(tools=[FindStub()])
-        result = await bot.find(name="OK")
-        assert result.status == "found"
 
 
 class TestSmithyClick:
@@ -220,7 +159,6 @@ class TestSmithyClick:
             async def execute(
                 self,
                 config: dict[str, Any],
-                ctx: ExecutionContext,
             ) -> Any:
                 received.update(config)
                 return {"status": "clicked"}
@@ -248,7 +186,6 @@ class TestSmithyClick:
             async def execute(
                 self,
                 config: dict[str, Any],
-                ctx: ExecutionContext,
             ) -> Any:
                 received.update(config)
                 return {"status": "clicked"}
@@ -291,7 +228,6 @@ class TestSmithyInputText:
             async def execute(
                 self,
                 config: dict[str, Any],
-                ctx: ExecutionContext,
             ) -> Any:
                 received.update(config)
                 return {"status": "typed"}
@@ -319,7 +255,6 @@ class TestSmithyInputText:
             async def execute(
                 self,
                 config: dict[str, Any],
-                ctx: ExecutionContext,
             ) -> Any:
                 received.update(config)
                 return {"status": "typed"}
@@ -364,7 +299,6 @@ class TestSmithySetText:
             async def execute(
                 self,
                 config: dict[str, Any],
-                ctx: ExecutionContext,
             ) -> Any:
                 received.update(config)
                 return {"status": "set"}

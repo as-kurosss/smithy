@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from smithy.core.context import ExecutionContext
 from smithy.core.errors import InvalidInput
 from smithy.core.tool import Tool
 
@@ -34,7 +33,6 @@ class ToolRegistry:
         self,
         name: str,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
         """Execute a tool by name with JSON parameters.
 
@@ -43,4 +41,4 @@ class ToolRegistry:
         tool = self.get(name)
         if tool is None:
             raise InvalidInput(f"Tool '{name}' not found")
-        return await tool.execute(config, ctx)
+        return await tool.execute(config)

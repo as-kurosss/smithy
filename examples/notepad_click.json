@@ -20,13 +20,6 @@
       }
     },
     {
-      "action": "windows.find",
-      "params": {
-        "class_name": "Notepad",
-        "output_key": "notepad_window"
-      }
-    },
-    {
       "action": "windows.click",
       "params": {
         "class_name": "Notepad",

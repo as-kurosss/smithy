@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from smithy.core.context import ExecutionContext
 from smithy.core.errors import ElementNotFound, InvalidInput, PlatformError
 from smithy.windows.selector import ElementSelector, _parse_control_type
 
@@ -106,36 +105,32 @@ class TestProcessTool:
         from smithy.windows.tools.process import ProcessTool
 
         tool = ProcessTool()
-        ctx = ExecutionContext.create()
         with pytest.raises(InvalidInput, match="Unknown"):
-            await tool.execute({"action": "reboot"}, ctx)
+            await tool.execute({"action": "reboot"})
 
     @pytest.mark.asyncio
     async def test_start_missing_command(self) -> None:
         from smithy.windows.tools.process import ProcessTool
 
         tool = ProcessTool()
-        ctx = ExecutionContext.create()
         with pytest.raises(InvalidInput, match="command"):
-            await tool.execute({"action": "start"}, ctx)
+            await tool.execute({"action": "start"})
 
     @pytest.mark.asyncio
     async def test_start_disallowed_command(self) -> None:
         from smithy.windows.tools.process import ProcessTool
 
         tool = ProcessTool()
-        ctx = ExecutionContext.create()
         with pytest.raises(InvalidInput, match="not in the allowed list"):
-            await tool.execute({"action": "start", "command": "cmd.exe"}, ctx)
+            await tool.execute({"action": "start", "command": "cmd.exe"})
 
     @pytest.mark.asyncio
     async def test_stop_missing_pid_and_name(self) -> None:
         from smithy.windows.tools.process import ProcessTool
 
         tool = ProcessTool()
-        ctx = ExecutionContext.create()
         with pytest.raises(InvalidInput, match="pid.*name"):
-            await tool.execute({"action": "stop"}, ctx)
+            await tool.execute({"action": "stop"})
 
 
 class TestClickTool:
@@ -151,7 +146,6 @@ class TestClickTool:
         from smithy.windows.tools.click import ClickTool
 
         tool = ClickTool()
-        ctx = ExecutionContext.create()
         # Mock uiautomation to prevent real UIA calls
         mock_auto = MagicMock()
         mock_auto.GetRootControl.return_value = MagicMock()
@@ -160,36 +154,5 @@ class TestClickTool:
             patch.dict("sys.modules", {"uiautomation": mock_auto}),
             pytest.raises((ElementNotFound, PlatformError)),
         ):
-            await tool.execute({}, ctx)
+            await tool.execute({})
 
-    @pytest.mark.asyncio
-    async def test_click_from_context_key(self) -> None:
-        from smithy.windows.element import SafeUIElement
-        from smithy.windows.tools.click import ClickTool
-
-        tool = ClickTool()
-        ctx = ExecutionContext.create()
-        mock_element = MagicMock()
-        safe = SafeUIElement(mock_element)
-        ctx.set("my_elem", safe)
-        result = await tool.execute({"element_key": "my_elem"}, ctx)
-        assert result["status"] == "clicked"
-        mock_element.Click.assert_called_once()
-
-
-class TestFindTool:
-    def test_tool_metadata(self) -> None:
-        from smithy.windows.tools.find import FindTool
-
-        tool = FindTool()
-        assert tool.name == "windows.find"
-        assert "output_key" in tool.schema().get("required", [])
-
-    @pytest.mark.asyncio
-    async def test_find_missing_output_key(self) -> None:
-        from smithy.windows.tools.find import FindTool
-
-        tool = FindTool()
-        ctx = ExecutionContext.create()
-        with pytest.raises(InvalidInput, match="output_key"):
-            await tool.execute({}, ctx)

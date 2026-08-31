@@ -6,7 +6,6 @@ from typing import Any
 
 import pytest
 
-from smithy.core.context import ExecutionContext
 from smithy.core.errors import InvalidInput
 from smithy.core.registry import ToolRegistry
 from smithy.core.tool import AbstractTool, Tool
@@ -35,7 +34,6 @@ class StubTool:
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
         return self._output
 
@@ -57,7 +55,6 @@ class FailTool:
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
         raise InvalidInput("deliberate failure")
 
@@ -76,7 +73,6 @@ class FakeAbstractTool(AbstractTool):
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
         return "fake executed"
 
@@ -97,16 +93,14 @@ class TestToolProtocol:
     @pytest.mark.asyncio
     async def test_stub_execute(self) -> None:
         tool = StubTool(output="hello")
-        ctx = ExecutionContext.create()
-        result = await tool.execute({}, ctx)
+        result = await tool.execute({})
         assert result == "hello"
 
     @pytest.mark.asyncio
     async def test_fail_tool_execute(self) -> None:
         tool = FailTool()
-        ctx = ExecutionContext.create()
         with pytest.raises(InvalidInput):
-            await tool.execute({}, ctx)
+            await tool.execute({})
 
 
 class TestToolRegistry:
@@ -131,24 +125,21 @@ class TestToolRegistry:
     async def test_execute_existing(self) -> None:
         reg = ToolRegistry()
         reg.register(StubTool(tool_name="echo", output=42))
-        ctx = ExecutionContext.create()
-        result = await reg.execute("echo", {}, ctx)
+        result = await reg.execute("echo", {})
         assert result == 42
 
     @pytest.mark.asyncio
     async def test_execute_nonexistent_raises(self) -> None:
         reg = ToolRegistry()
-        ctx = ExecutionContext.create()
         with pytest.raises(InvalidInput, match="not found"):
-            await reg.execute("no.such", {}, ctx)
+            await reg.execute("no.such", {})
 
     @pytest.mark.asyncio
     async def test_execute_fail_tool(self) -> None:
         reg = ToolRegistry()
         reg.register(FailTool())
-        ctx = ExecutionContext.create()
         with pytest.raises(InvalidInput, match="deliberate failure"):
-            await reg.execute("stub.fail", {}, ctx)
+            await reg.execute("stub.fail", {})
 
     def test_register_overwrites(self) -> None:
         reg = ToolRegistry()

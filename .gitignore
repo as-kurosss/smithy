@@ -14,7 +14,12 @@ venv/
 # Test artifacts
 selectors.json
 selectors1.json
+selectors2.json
+selectors3.json
 test_output.txt
+
+# Lockfile (library, not app)
+uv.lock
 
 # Smith Studio (private, paid product)
 apps/smith-studio/

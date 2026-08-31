@@ -5,17 +5,16 @@ Requires: pip install smithy
 import asyncio
 
 from smithy import Smithy, tool
-from smithy.core.context import ExecutionContext
 
 
 @tool("greet", description="Greet a person by name")
-async def greet(config: dict, ctx: ExecutionContext) -> dict:
+async def greet(config: dict) -> dict:
     name = config.get("name", "World")
     return {"message": f"Hello, {name}!"}
 
 
 @tool("add", description="Add two numbers")
-async def add(config: dict, ctx: ExecutionContext) -> dict:
+async def add(config: dict) -> dict:
     a = config.get("a", 0)
     b = config.get("b", 0)
     return {"result": a + b}

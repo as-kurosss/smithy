@@ -47,11 +47,8 @@ def main(argv: list[str] | None = None) -> None:
     p_single.add_argument(
         "-t", "--tool",
         choices=[t.value for t in ToolType],
-        default="find",
-        help="Tool type for config generation (default: find)",
-    )
-    p_single.add_argument(
-        "-k", "--output-key", default="el_01", help="Output key for find step"
+        default="click",
+        help="Tool type for config generation (default: click)",
     )
     p_single.add_argument("--text", default="", help="Text for input_text / set_text")
     p_single.add_argument(
@@ -87,7 +84,6 @@ def main(argv: list[str] | None = None) -> None:
             output=args.output,
             description=args.description,
             tool_type=tool_type,
-            output_key=args.output_key,
             text=args.text,
             duration_ms=args.duration_ms,
             clip=args.clip,

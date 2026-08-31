@@ -7,7 +7,6 @@ import os
 import subprocess
 from typing import Any
 
-from smithy.core.context import ExecutionContext
 from smithy.core.errors import InvalidInput, PlatformError
 from smithy.core.tool import AbstractTool
 
@@ -59,7 +58,6 @@ class ProcessTool(AbstractTool):
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
         action = config.get("action", "").lower()
 

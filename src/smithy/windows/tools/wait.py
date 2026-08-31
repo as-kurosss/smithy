@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from smithy.core.context import ExecutionContext
-from smithy.core.errors import ElementNotFound, InvalidInput, PlatformError
+from smithy.core.errors import InvalidInput
 from smithy.core.tool import AbstractTool
 from smithy.windows.selector import ElementSelector
 
@@ -65,7 +64,6 @@ class WaitTool(AbstractTool):
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
         timeout_ms = config.get("timeout_ms", 10000)
         interval_ms = config.get("interval_ms", 500)

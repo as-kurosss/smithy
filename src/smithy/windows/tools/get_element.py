@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from smithy.core.context import ExecutionContext
 from smithy.core.errors import ElementNotFound
 from smithy.core.tool import AbstractTool
 from smithy.windows.element import SafeUIElement
@@ -50,9 +49,8 @@ class GetElementTool(AbstractTool):
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
-        element = await resolve_element(config, ctx)
+        element = await resolve_element(config)
         if element is None:
             raise ElementNotFound(
                 "No element found: provide element_key or selector fields",

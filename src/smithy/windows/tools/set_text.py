@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from smithy.core.context import ExecutionContext
 from smithy.core.errors import ElementNotFound, InvalidInput, PlatformError
 from smithy.core.tool import AbstractTool
 from smithy.windows.tools._resolve import resolve_element
@@ -67,13 +66,12 @@ class SetTextTool(AbstractTool):
     async def execute(
         self,
         config: dict[str, Any],
-        ctx: ExecutionContext,
     ) -> Any:
         text = config.get("text")
         if text is None:
             raise InvalidInput("Missing required parameter: text", param="text")
 
-        element = await resolve_element(config, ctx)
+        element = await resolve_element(config)
         if element is None:
             raise ElementNotFound(
                 "No element found: provide element_key or selector fields",
