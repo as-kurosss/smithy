@@ -259,6 +259,140 @@ class TestSmithyClick:
         assert received["pid"] == 55  # explicit pid wins
 
 
+class TestSmithyInputText:
+    @pytest.mark.asyncio
+    async def test_input_text_with_handle(self) -> None:
+        stub = StubTool(tool_name="windows.input_text", output={"status": "typed"})
+        bot = Smithy(tools=[stub])
+        handle = ProcessHandle(pid=42, name="app")
+        result = await bot.input_text(handle, text="hello")
+        assert result.status == "typed"
+
+    @pytest.mark.asyncio
+    async def test_input_text_without_handle(self) -> None:
+        stub = StubTool(tool_name="windows.input_text", output={"status": "typed"})
+        bot = Smithy(tools=[stub])
+        result = await bot.input_text(text="hello")
+        assert result.status == "typed"
+
+    @pytest.mark.asyncio
+    async def test_input_text_pid_forwarded(self) -> None:
+        received: dict[str, Any] = {}
+
+        class Capture(AbstractTool):
+            @property
+            def name(self) -> str:
+                return "windows.input_text"
+
+            @property
+            def description(self) -> str:
+                return "Capture."
+
+            async def execute(
+                self,
+                config: dict[str, Any],
+                ctx: ExecutionContext,
+            ) -> Any:
+                received.update(config)
+                return {"status": "typed"}
+
+        bot = Smithy(tools=[Capture()])
+        handle = ProcessHandle(pid=99, name="app")
+        await bot.input_text(handle, text="hi")
+        assert received["pid"] == 99
+        assert received["text"] == "hi"
+
+    @pytest.mark.asyncio
+    async def test_input_text_handle_first_positional(self) -> None:
+        """handle must be the first positional arg, matching click/find."""
+        received: dict[str, Any] = {}
+
+        class Capture(AbstractTool):
+            @property
+            def name(self) -> str:
+                return "windows.input_text"
+
+            @property
+            def description(self) -> str:
+                return "Capture."
+
+            async def execute(
+                self,
+                config: dict[str, Any],
+                ctx: ExecutionContext,
+            ) -> Any:
+                received.update(config)
+                return {"status": "typed"}
+
+        bot = Smithy(tools=[Capture()])
+        handle = ProcessHandle(pid=99, name="app")
+        await bot.input_text(handle, text="hello")
+        # text must be a string, not a ProcessHandle
+        assert isinstance(received["text"], str)
+        assert received["pid"] == 99
+
+
+class TestSmithySetText:
+    @pytest.mark.asyncio
+    async def test_set_text_with_handle(self) -> None:
+        stub = StubTool(tool_name="windows.set_text", output={"status": "set"})
+        bot = Smithy(tools=[stub])
+        handle = ProcessHandle(pid=42, name="app")
+        result = await bot.set_text(handle, text="hello")
+        assert result.status == "set"
+
+    @pytest.mark.asyncio
+    async def test_set_text_without_handle(self) -> None:
+        stub = StubTool(tool_name="windows.set_text", output={"status": "set"})
+        bot = Smithy(tools=[stub])
+        result = await bot.set_text(text="hello")
+        assert result.status == "set"
+
+    @pytest.mark.asyncio
+    async def test_set_text_handle_first_positional(self) -> None:
+        received: dict[str, Any] = {}
+
+        class Capture(AbstractTool):
+            @property
+            def name(self) -> str:
+                return "windows.set_text"
+
+            @property
+            def description(self) -> str:
+                return "Capture."
+
+            async def execute(
+                self,
+                config: dict[str, Any],
+                ctx: ExecutionContext,
+            ) -> Any:
+                received.update(config)
+                return {"status": "set"}
+
+        bot = Smithy(tools=[Capture()])
+        handle = ProcessHandle(pid=99, name="app")
+        await bot.set_text(handle, text="hello")
+        assert isinstance(received["text"], str)
+        assert received["pid"] == 99
+
+
+class TestSmithyGetElement:
+    @pytest.mark.asyncio
+    async def test_get_element_with_handle(self) -> None:
+        output = {"element": {"name": "OK"}}
+        bot = Smithy(tools=[StubTool(tool_name="windows.get_element", output=output)])
+        handle = ProcessHandle(pid=42, name="app")
+        result = await bot.get_element(handle)
+        assert result == output
+
+    @pytest.mark.asyncio
+    async def test_get_element_without_handle(self) -> None:
+        output = {"element": {"name": "OK"}}
+        bot = Smithy(tools=[StubTool(tool_name="windows.get_element", output=output)])
+        result = await bot.get_element(name="OK")
+        assert result == output
+
+
 class TestSmithyCall:
     @pytest.mark.asyncio
     async def test_call_custom_tool(self) -> None:

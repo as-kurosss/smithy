@@ -268,15 +268,16 @@ class Smithy:
 
     async def input_text(
         self,
-        text: str,
         handle: _SupportsPid | None = None,
+        *,
+        text: str,
         **kwargs: Any,
     ) -> InputTextResult:
         """Type text into a UI element (focuses it, then sends keystrokes).
 
         Args:
-            text: Text to type.
             handle: ProcessHandle to scope element search by PID.
+            text: Text to type.
             **kwargs: ``element_key`` or selector fields (name,
                 automation_id, control_type, class_name, pid).
 
@@ -292,15 +293,16 @@ class Smithy:
 
     async def set_text(
         self,
-        text: str,
         handle: _SupportsPid | None = None,
+        *,
+        text: str,
         **kwargs: Any,
     ) -> SetTextResult:
         """Replace the entire text of a UI element via UIA ValuePattern.
 
         Args:
-            text: Text to set.
             handle: ProcessHandle to scope element search by PID.
+            text: Text to set.
             **kwargs: ``element_key`` or selector fields (name,
                 automation_id, control_type, class_name, pid).
 

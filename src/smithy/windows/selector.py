@@ -99,6 +99,10 @@ class ElementSelector:
     def find_from_desktop(self) -> Any:
         """Find the first matching element starting from the desktop root.
 
+        When only ``pid`` is set (no name / automation_id / control_type /
+        class_name), the search is narrowed to ``WindowControl(pid=…)``,
+        which avoids a full desktop tree traversal and returns quickly.
+
         Returns:
             The first matching control.
 
@@ -108,13 +112,25 @@ class ElementSelector:
         """
         try:
             import uiautomation as auto
-
-            root = auto.GetRootControl()
         except Exception as exc:
             raise PlatformError(
                 "UIAutomation init failed",
                 source=exc,
             ) from exc
+
+        # Fast path: PID only — find the window directly without
+        # scanning the entire desktop tree (which can hang on large
+        # UIA trees when only filtering by PID).
+        if (
+            self.pid is not None
+            and self.name is None
+            and self.automation_id is None
+            and self.control_type is None
+            and self.class_name is None
+        ):
+            return _find_window_by_pid(self.pid)
+
+        root = auto.GetRootControl()
         return self.find_first(root, auto.uiautomation)
 
     def _build_compare(self) -> Callable[[Any, int], bool]:
@@ -147,6 +163,48 @@ class ElementSelector:
             return not (pid is not None and ctrl.ProcessId != pid)
 
         return compare
+
+
+def _find_window_by_pid(pid: int) -> Any:
+    """Find the first visible window belonging to *pid*.
+
+    Uses the Win32 ``EnumWindows`` API directly so the search is
+    bounded to top-level windows instead of traversing the entire
+    UIA tree.
+
+    Raises:
+        ElementNotFound: If no visible window belongs to *pid*.
+        PlatformError: If the Win32 call fails.
+    """
+    import ctypes
+    import ctypes.wintypes
+
+    import uiautomation as auto
+
+    result_hwnd: int | None = None
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)  # type: ignore[untyped-decorator]
+    def _enum_callback(hwnd: int, _lparam: int) -> bool:
+        nonlocal result_hwnd
+        if ctypes.windll.user32.IsWindowVisible(hwnd):
+            out_pid = ctypes.wintypes.DWORD()
+            ctypes.windll.user32.GetWindowThreadProcessId(
+                hwnd, ctypes.byref(out_pid),
+            )
+            if out_pid.value == pid:
+                result_hwnd = hwnd
+                return False  # stop enumeration
+        return True  # continue
+
+    ctypes.windll.user32.EnumWindows(_enum_callback, 0)
+
+    if result_hwnd is not None:
+        return auto.ControlFromHandle(result_hwnd)
+
+    raise ElementNotFound(
+        f"No window found for PID {pid}",
+        selector={"pid": pid},
+    )
 
 
 # Control type string → integer mapping (matching Rust parse_control_type)
