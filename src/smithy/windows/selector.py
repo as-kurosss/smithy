@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import fnmatch
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from smithy.core.errors import ElementNotFound, PlatformError
@@ -16,6 +16,7 @@ class ElementSelector:
 
     Uses ``uiautomation.FindControl`` with a compare function.
     """
+
     pid: int | None = None
     name: str | None = None
     automation_id: str | None = None
@@ -23,34 +24,32 @@ class ElementSelector:
     class_name: str | None = None
 
     def with_pid(self, pid: int) -> ElementSelector:
-        """Filter by process ID."""
-        self.pid = pid
-        return self
+        """Filter by process ID (returns a new selector)."""
+        return replace(self, pid=pid)
 
     def with_name(self, name: str) -> ElementSelector:
-        """Filter by element name.
+        """Filter by element name (returns a new selector).
 
         Supports glob-style wildcards (``*`` and ``?``) via
         :mod:`fnmatch` when the name contains ``*`` or ``?``.
         Without wildcards the match is exact.
         """
-        self.name = name
-        return self
+        return replace(self, name=name)
 
     def with_automation_id(self, automation_id: str) -> ElementSelector:
-        """Filter by automation ID."""
-        self.automation_id = automation_id
-        return self
+        """Filter by automation ID (returns a new selector)."""
+        return replace(self, automation_id=automation_id)
 
     def with_control_type(self, control_type: str) -> ElementSelector:
-        """Filter by control type name (e.g. Button, Edit, Window)."""
-        self.control_type = control_type
-        return self
+        """Filter by control type name, e.g. Button, Edit, Window.
+
+        Returns a new selector; the original is left unchanged.
+        """
+        return replace(self, control_type=control_type)
 
     def with_class_name(self, class_name: str) -> ElementSelector:
-        """Filter by class name."""
-        self.class_name = class_name
-        return self
+        """Filter by class name (returns a new selector)."""
+        return replace(self, class_name=class_name)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a dict of non-None fields (for JSON serialization)."""
@@ -146,21 +145,22 @@ class ElementSelector:
         use_wildcard = name is not None and _has_wildcard(name)
 
         def compare(ctrl: Any, depth: int) -> bool:
-            # Name has priority — if it matches, accept the element
-            # regardless of class_name (class_name scopes the parent window,
-            # but child elements have different ClassName values).
+            # All set fields combine with AND so pid scoping always applies.
             if name is not None:
                 if use_wildcard:
-                    return bool(fnmatch.fnmatch(ctrl.Name, name))
-                return bool(ctrl.Name == name)
-            # Without name, filter by other properties.
+                    if not fnmatch.fnmatch(ctrl.Name, name):
+                        return False
+                elif ctrl.Name != name:
+                    return False
             if automation_id is not None and ctrl.AutomationId != automation_id:
                 return False
             if ct_value is not None and ctrl.ControlType != ct_value:
                 return False
             if class_name is not None and ctrl.ClassName != class_name:
                 return False
-            return not (pid is not None and ctrl.ProcessId != pid)
+            if pid is not None and ctrl.ProcessId != pid:  # noqa: SIM103 — explicit chain reads better
+                return False
+            return True
 
         return compare
 
@@ -189,7 +189,8 @@ def _find_window_by_pid(pid: int) -> Any:
         if ctypes.windll.user32.IsWindowVisible(hwnd):
             out_pid = ctypes.wintypes.DWORD()
             ctypes.windll.user32.GetWindowThreadProcessId(
-                hwnd, ctypes.byref(out_pid),
+                hwnd,
+                ctypes.byref(out_pid),
             )
             if out_pid.value == pid:
                 result_hwnd = hwnd

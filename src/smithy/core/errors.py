@@ -33,6 +33,12 @@ class InvalidInput(ToolError):
         self.param = param
         self.input_value = input_value
 
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}({str(self)!r}, "
+            f"param={self.param!r}, input_value={self.input_value!r})"
+        )
+
 
 class ElementNotFound(ToolError):
     """UI element not found or inaccessible."""
@@ -45,6 +51,9 @@ class ElementNotFound(ToolError):
     ) -> None:
         super().__init__(message)
         self.selector = selector
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}({str(self)!r}, selector={self.selector!r})"
 
 
 class Cancelled(ToolError):

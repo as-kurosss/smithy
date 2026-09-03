@@ -2,6 +2,7 @@
 
 Requires: pip install smithy[windows]
 """
+
 import asyncio
 
 from smithy import Smithy

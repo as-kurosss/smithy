@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Protocol
 
-from smithy.core.events import EventBus, ToolEvent
+from smithy.core.events import EventBus, Middleware, ToolEvent
 from smithy.core.registry import ToolRegistry
 from smithy.core.tool import Tool
 
@@ -66,7 +66,7 @@ class Smithy:
         """Register a tool for use by this bot."""
         self._registry.register(tool)
 
-    def add_middleware(self, middleware: Any) -> None:
+    def add_middleware(self, middleware: Middleware) -> None:
         """Add a middleware to the event pipeline.
 
         Args:
@@ -133,17 +133,11 @@ class Smithy:
         """
         result: dict[str, Any]
         if handle is not None:
-            result = await self._execute(
-                "windows.process", {"action": "stop", "pid": handle.pid}
-            )
+            result = await self._execute("windows.process", {"action": "stop", "pid": handle.pid})
         elif pid is not None:
-            result = await self._execute(
-                "windows.process", {"action": "stop", "pid": pid}
-            )
+            result = await self._execute("windows.process", {"action": "stop", "pid": pid})
         elif name is not None:
-            result = await self._execute(
-                "windows.process", {"action": "stop", "name": name}
-            )
+            result = await self._execute("windows.process", {"action": "stop", "name": name})
         else:
             raise ValueError("Provide handle, pid, or name")
         return result
@@ -225,9 +219,7 @@ class Smithy:
         Args:
             duration_ms: Delay duration in milliseconds.
         """
-        await self._execute(
-            "windows.delay", {"duration_ms": duration_ms}
-        )
+        await self._execute("windows.delay", {"duration_ms": duration_ms})
 
     async def screenshot(
         self,
@@ -255,9 +247,7 @@ class Smithy:
             config["pid"] = handle.pid
         elif pid is not None:
             config["pid"] = pid
-        out: dict[str, Any] = await self._execute(
-            "windows.screenshot", config
-        )
+        out: dict[str, Any] = await self._execute("windows.screenshot", config)
         return out
 
     async def input_text(
@@ -283,9 +273,7 @@ class Smithy:
         """
         if handle is not None:
             kwargs.setdefault("pid", handle.pid)
-        result = await self._execute(
-            "windows.input_text", {"text": text, **kwargs}
-        )
+        result = await self._execute("windows.input_text", {"text": text, **kwargs})
         return InputTextResult(status=result.get("status", "typed"))
 
     async def keyboard(
@@ -314,9 +302,7 @@ class Smithy:
         """
         if handle is not None:
             kwargs.setdefault("pid", handle.pid)
-        result = await self._execute(
-            "windows.keyboard", {"keys": keys, **kwargs}
-        )
+        result = await self._execute("windows.keyboard", {"keys": keys, **kwargs})
         return InputTextResult(status=result.get("status", "sent"))
 
     async def set_text(
@@ -339,9 +325,7 @@ class Smithy:
         """
         if handle is not None:
             kwargs.setdefault("pid", handle.pid)
-        result = await self._execute(
-            "windows.set_text", {"text": text, **kwargs}
-        )
+        result = await self._execute("windows.set_text", {"text": text, **kwargs})
         return SetTextResult(status=result.get("status", "set"))
 
     async def get_element(
@@ -362,9 +346,7 @@ class Smithy:
         """
         if handle is not None:
             kwargs.setdefault("pid", handle.pid)
-        out: dict[str, Any] = await self._execute(
-            "windows.get_element", kwargs
-        )
+        out: dict[str, Any] = await self._execute("windows.get_element", kwargs)
         return out
 
     async def call(self, name: str, **kwargs: Any) -> Any:

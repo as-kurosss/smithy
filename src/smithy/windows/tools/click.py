@@ -5,14 +5,14 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from smithy.core.errors import ElementNotFound, PlatformError
+from smithy.core.errors import ElementNotFound
 from smithy.core.tool import AbstractTool
 from smithy.windows.element import SafeUIElement
 from smithy.windows.tools._resolve import resolve_element
 
 
 class ClickTool(AbstractTool):
-    """Perform a click on a UI element by context key or inline selector."""
+    """Perform a click on a UI element by inline selector."""
 
     @property
     def name(self) -> str:
@@ -20,16 +20,12 @@ class ClickTool(AbstractTool):
 
     @property
     def description(self) -> str:
-        return "Performs a click on a UI element by context key or inline selector"
+        return "Performs a click on a UI element by inline selector"
 
     def schema(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "element_key": {
-                    "type": "string",
-                    "description": "Key in context with UIElement",
-                },
                 "name": {
                     "type": "string",
                     "description": "Element name to find",
@@ -58,7 +54,8 @@ class ClickTool(AbstractTool):
         element = await resolve_element(config)
         if element is None:
             raise ElementNotFound(
-                "No element found: provide element_key or selector fields",
+                "No element found: provide selector fields "
+                "(name, automation_id, control_type, class_name, pid)",
                 selector=config,
             )
 
@@ -69,4 +66,3 @@ class ClickTool(AbstractTool):
             await loop.run_in_executor(None, element.Click)
 
         return {"status": "clicked"}
-

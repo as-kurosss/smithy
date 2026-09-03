@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from smithy.core.errors import InvalidInput
+from smithy.core.errors import ElementNotFound, InvalidInput, PlatformError
 from smithy.core.tool import AbstractTool
-from smithy.windows.selector import ElementSelector
+from smithy.windows.selector import ElementSelector, _parse_control_type
 
 
 class WaitTool(AbstractTool):
@@ -68,6 +68,18 @@ class WaitTool(AbstractTool):
         timeout_ms = config.get("timeout_ms", 10000)
         interval_ms = config.get("interval_ms", 500)
 
+        if (
+            isinstance(timeout_ms, bool)
+            or not isinstance(timeout_ms, int)
+            or isinstance(interval_ms, bool)
+            or not isinstance(interval_ms, int)
+        ):
+            raise InvalidInput(
+                "Invalid timeout_ms/interval_ms: expected integers",
+                param="timeout_ms",
+                input_value={"timeout_ms": timeout_ms, "interval_ms": interval_ms},
+            )
+
         if interval_ms < 50:
             raise InvalidInput(
                 "interval_ms must be >= 50",
@@ -82,30 +94,36 @@ class WaitTool(AbstractTool):
                 input_value=timeout_ms,
             )
 
+        if "control_type" in config:
+            raw_ct = config["control_type"]
+            if not isinstance(raw_ct, str) or _parse_control_type(raw_ct) is None:
+                raise InvalidInput(
+                    f"Unknown control_type: {raw_ct!r}",
+                    param="control_type",
+                    input_value=raw_ct,
+                )
         selector = ElementSelector()
         if "name" in config:
-            selector.with_name(config["name"])
+            selector = selector.with_name(config["name"])
         if "automation_id" in config:
-            selector.with_automation_id(config["automation_id"])
+            selector = selector.with_automation_id(config["automation_id"])
         if "control_type" in config:
-            selector.with_control_type(config["control_type"])
+            selector = selector.with_control_type(config["control_type"])
         if "class_name" in config:
-            selector.with_class_name(config["class_name"])
+            selector = selector.with_class_name(config["class_name"])
         if "pid" in config:
-            selector.with_pid(config["pid"])
+            selector = selector.with_pid(config["pid"])
 
-        deadline = asyncio.get_event_loop().time() + (timeout_ms / 1000)
+        deadline = asyncio.get_running_loop().time() + (timeout_ms / 1000)
         interval = interval_ms / 1000
         while True:
             try:
-                await asyncio.get_running_loop().run_in_executor(
-                    None, selector.find_from_desktop
-                )
+                await asyncio.get_running_loop().run_in_executor(None, selector.find_from_desktop)
                 return True
             except (ElementNotFound, PlatformError):
                 pass
 
-            if asyncio.get_event_loop().time() >= deadline:
+            if asyncio.get_running_loop().time() >= deadline:
                 return False
 
             await asyncio.sleep(interval)

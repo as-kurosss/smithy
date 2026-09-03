@@ -10,6 +10,7 @@ Public API::
         path_to_dicts,
     )
 """
+
 from smithy.windows.tools.selector_capture.capture import (
     BestSelector,
     CaptureRecord,

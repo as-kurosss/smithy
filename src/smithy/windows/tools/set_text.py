@@ -44,10 +44,6 @@ class SetTextTool(AbstractTool):
             "type": "object",
             "properties": {
                 "text": {"type": "string", "description": "Text to set"},
-                "element_key": {
-                    "type": "string",
-                    "description": "Key in context with UIElement",
-                },
                 "name": {"type": "string", "description": "Element name to find"},
                 "automation_id": {
                     "type": "string",
@@ -68,17 +64,23 @@ class SetTextTool(AbstractTool):
         config: dict[str, Any],
     ) -> Any:
         text = config.get("text")
-        if text is None:
-            raise InvalidInput("Missing required parameter: text", param="text")
+        if not isinstance(text, str):
+            raise InvalidInput(
+                "Missing required parameter: text (expected a string)",
+                param="text",
+                input_value=text,
+            )
 
         element = await resolve_element(config)
         if element is None:
             raise ElementNotFound(
-                "No element found: provide element_key or selector fields",
+                "No element found: provide selector fields "
+                "(name, automation_id, control_type, class_name, pid)",
                 selector=config,
             )
 
         loop = asyncio.get_running_loop()
+        last_error: Exception | None = None
 
         # 1. Try UIA IValueProvider (WPF / UWP controls).
         try:
@@ -86,21 +88,25 @@ class SetTextTool(AbstractTool):
             if pattern is not None:
                 await loop.run_in_executor(None, pattern.SetValue, text)
                 return {"status": "set", "text": text, "method": "value_pattern"}
-        except Exception:
-            pass  # element does not support ValuePattern
+        except Exception as exc:
+            last_error = exc  # element does not support ValuePattern; try fallback
 
         # 2. Try WM_SETTEXT via the element's HWND (Win32 controls).
         try:
             hwnd: int | None = await loop.run_in_executor(
-                None, getattr, element, "NativeWindowHandle", None,
+                None,
+                getattr,
+                element,
+                "NativeWindowHandle",
+                None,
             )
             if hwnd:
                 await loop.run_in_executor(None, _send_wm_settext, hwnd, text)
                 return {"status": "set", "text": text, "method": "wm_settext"}
-        except Exception:
-            pass
+        except Exception as exc:
+            last_error = exc
 
         raise PlatformError(
             "Element does not support programmatic text setting",
-        )
-        return {"status": "set", "text": text}
+            source=last_error,
+        ) from last_error

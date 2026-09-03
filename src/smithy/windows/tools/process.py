@@ -12,14 +12,16 @@ from smithy.core.tool import AbstractTool
 
 # Whitelist of allowed executables (case-insensitive).
 # cmd.exe and powershell.exe intentionally excluded (arbitrary command execution).
-_ALLOWED_COMMANDS: frozenset[str] = frozenset({
-    "notepad.exe",
-    "calc.exe",
-    "mspaint.exe",
-    "explorer.exe",
-    "write.exe",
-    "wordpad.exe",
-})
+_ALLOWED_COMMANDS: frozenset[str] = frozenset(
+    {
+        "notepad.exe",
+        "calc.exe",
+        "mspaint.exe",
+        "explorer.exe",
+        "write.exe",
+        "wordpad.exe",
+    }
+)
 
 
 def _is_command_allowed(cmd: str) -> bool:
@@ -59,7 +61,14 @@ class ProcessTool(AbstractTool):
         self,
         config: dict[str, Any],
     ) -> Any:
-        action = config.get("action", "").lower()
+        raw_action = config.get("action", "")
+        if not isinstance(raw_action, str):
+            raise InvalidInput(
+                "Invalid 'action': expected a string",
+                param="action",
+                input_value=raw_action,
+            )
+        action = raw_action.lower()
 
         try:
             if action == "start":
@@ -84,10 +93,11 @@ class ProcessTool(AbstractTool):
 async def _action_start(config: dict[str, Any]) -> dict[str, Any]:
     """Start a new process."""
     command = config.get("command")
-    if not command:
+    if not isinstance(command, str) or not command:
         raise InvalidInput(
             "Missing 'command' for start action",
             param="command",
+            input_value=command,
         )
 
     if not _is_command_allowed(command):
@@ -98,7 +108,19 @@ async def _action_start(config: dict[str, Any]) -> dict[str, Any]:
         )
 
     args = config.get("args", [])
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        raise InvalidInput(
+            "Invalid 'args': expected a list of strings",
+            param="args",
+            input_value=args,
+        )
     working_dir = config.get("working_dir")
+    if working_dir is not None and not isinstance(working_dir, str):
+        raise InvalidInput(
+            "Invalid 'working_dir': expected a string",
+            param="working_dir",
+            input_value=working_dir,
+        )
 
     loop = asyncio.get_running_loop()
 
@@ -122,11 +144,25 @@ async def _action_stop(config: dict[str, Any]) -> dict[str, Any]:
     if pid is None and name is None:
         raise InvalidInput(
             "Must provide 'pid' or 'name' for stop action",
+            param="pid",
+        )
+    if pid is not None and (isinstance(pid, bool) or not isinstance(pid, int)):
+        raise InvalidInput(
+            "Invalid 'pid': expected an integer",
+            param="pid",
+            input_value=pid,
+        )
+    if name is not None and (not isinstance(name, str) or not name):
+        raise InvalidInput(
+            "Invalid 'name': expected a non-empty string",
+            param="name",
+            input_value=name,
         )
 
     loop = asyncio.get_running_loop()
 
     if pid is not None:
+
         def _stop_by_pid() -> None:
             result = subprocess.run(
                 ["taskkill", "/F", "/PID", str(pid)],
@@ -141,8 +177,11 @@ async def _action_stop(config: dict[str, Any]) -> dict[str, Any]:
         await loop.run_in_executor(None, _stop_by_pid)
         return {"status": "stopped", "method": "pid", "pid": pid}
 
-    # name is guaranteed non-None here (checked above)
-    assert name is not None  # noqa: S101 — narrowed by the if-chain above
+    if name is None:  # narrowed by the pid-branch above; explicit, not assert
+        raise InvalidInput(
+            "Must provide 'pid' or 'name' for stop action",
+            param="name",
+        )
 
     def _stop_by_name() -> None:
         result = subprocess.run(

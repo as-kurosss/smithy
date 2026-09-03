@@ -20,7 +20,7 @@ import logging
 import queue
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from smithy.windows.tools.selector_capture.capture import (
     BestSelector,
@@ -39,11 +39,19 @@ from smithy.windows.tools.selector_capture.generate import (
 try:
     from pynput import keyboard as _kb
     from pynput import mouse as _ms
-except ImportError as exc:
-    raise ImportError(
-        "pynput is required for selector-capture recorders.  "
-        "Install it with:  pip install pynput"
-    ) from exc
+except Exception:  # pragma: no cover — optional recorder backend
+    _kb = None
+    _ms = None
+
+
+def _require_pynput() -> None:
+    """Raise a helpful error if the pynput backend is unavailable."""
+    if _kb is None or _ms is None:
+        raise ImportError(
+            "pynput is required for selector-capture recorders.  "
+            "Install it with:  pip install pynput"
+        )
+
 
 try:
     import pyperclip
@@ -59,27 +67,34 @@ logger = logging.getLogger(__name__)
 class SharedEvent:
     """Events emitted by the shared (CTRL-based) listener."""
 
-    kind: str  # "trigger" | "escape" | "stop"
+    kind: Literal["trigger", "escape", "stop"]
 
 
 @dataclass(frozen=True)
 class SeriesEvent:
     """Events emitted by the series (auto-record) listener."""
 
-    kind: str  # "stop" | "mouse_down" | "input"
+    kind: Literal["stop", "mouse_down", "input"]
 
-
-_STOP_SENTINEL = object()
 
 # ── Input helpers ────────────────────────────────────────────────────────────
 
 
 def _is_modifier(key: Any) -> bool:
     """Return ``True`` if *key* is a modifier key."""
-    return isinstance(key, (_kb.Key.ctrl_l, _kb.Key.ctrl_r,
-                            _kb.Key.shift_l, _kb.Key.shift_r,
-                            _kb.Key.alt_l, _kb.Key.alt_gr,
-                            _kb.Key.cmd, _kb.Key.cmd_l, _kb.Key.cmd_r))
+    if _kb is None:
+        return False
+    return key in (
+        _kb.Key.ctrl_l,
+        _kb.Key.ctrl_r,
+        _kb.Key.shift_l,
+        _kb.Key.shift_r,
+        _kb.Key.alt_l,
+        _kb.Key.alt_gr,
+        _kb.Key.cmd,
+        _kb.Key.cmd_l,
+        _kb.Key.cmd_r,
+    )
 
 
 def _is_printable(key: Any) -> bool:
@@ -108,6 +123,7 @@ def _shared_listener(out: queue.Queue[SharedEvent]) -> _kb.Listener:
     The listener blocks the CTRL-trigger when a non-modifier key is
     pressed while CTRL is held (e.g. CTRL+C → no trigger).
     """
+    _require_pynput()
     ctrl_down = False
     shift_down = False
     blocked = False
@@ -161,6 +177,7 @@ def _series_listener(out: queue.Queue[SeriesEvent]) -> _kb.Listener:
         * ``SeriesEvent("stop")`` — Ctrl+Shift+F2 pressed.
         * ``SeriesEvent("input")`` — printable key without CTRL/ALT.
     """
+    _require_pynput()
     ctrl = False
     shift = False
     alt = False
@@ -202,6 +219,7 @@ def _mouse_listener(out: queue.Queue[SeriesEvent]) -> _ms.Listener:
     Events emitted:
         * ``SeriesEvent("mouse_down")`` — any mouse button pressed.
     """
+    _require_pynput()
 
     def on_click(x: int, y: int, button: _ms.Button, pressed: bool) -> None:
         if pressed:
@@ -272,11 +290,9 @@ def run_single_mode(
         duration_ms: Duration in ms for the ``wait`` tool.
         clip: If ``True``, copy the generated config to the clipboard.
     """
+    _require_pynput()
     logger.info("Selector Capture: Single Mode")
-    logger.info(
-        "Place cursor over a UI element and press CTRL to capture. "
-        "Press ESC to cancel."
-    )
+    logger.info("Place cursor over a UI element and press CTRL to capture. Press ESC to cancel.")
 
     events: queue.Queue[SharedEvent] = queue.Queue()
     kb = _shared_listener(events)
@@ -300,6 +316,7 @@ def run_single_mode(
         if event.kind == "trigger":
             try:
                 from pynput.mouse import Controller as MouseCtrl
+
                 mouse = MouseCtrl()
                 x, y = mouse.position
                 path, sel = capture_at_point(float(x), float(y))
@@ -352,6 +369,7 @@ def run_series_mode(output: str) -> None:
     Args:
         output: Path to the output JSON file.
     """
+    _require_pynput()
     logger.info("Selector Capture: Series Mode")
     logger.info("Mouse clicks -> click node pairs")
     logger.info("Keyboard -> input_text node pairs")
@@ -376,22 +394,19 @@ def run_series_mode(output: str) -> None:
             # Flush pending text input before stopping.
             if pending_input and last_selector is not None:
                 params = GenerateParams()
-                nodes.extend(
-                    generate_nodes(last_selector, ToolType.INPUT_TEXT, params)
-                )
+                nodes.extend(generate_nodes(last_selector, ToolType.INPUT_TEXT, params))
             break
 
         if event.kind == "mouse_down":
             # Flush pending input before handling click.
             if pending_input and last_selector is not None:
                 params = GenerateParams()
-                nodes.extend(
-                    generate_nodes(last_selector, ToolType.INPUT_TEXT, params)
-                )
+                nodes.extend(generate_nodes(last_selector, ToolType.INPUT_TEXT, params))
             pending_input = False
 
             try:
                 from pynput.mouse import Controller as MouseCtrl
+
                 mouse = MouseCtrl()
                 x, y = mouse.position
                 path, sel = capture_at_point(float(x), float(y))
@@ -404,9 +419,7 @@ def run_series_mode(output: str) -> None:
                 nodes.extend(new_nodes)
                 last_selector = sel
             except Exception:
-                logger.exception(
-                    "Could not capture element at mouse position"
-                )
+                logger.exception("Could not capture element at mouse position")
 
         elif event.kind == "input":
             pending_input = True
@@ -431,6 +444,7 @@ def run_record_mode(output: str) -> None:
     Args:
         output: Path to the output JSON file.
     """
+    _require_pynput()
     logger.info("Selector Capture: Record Mode")
     logger.info("Hotkeys:")
     logger.info("  CTRL          -> capture element under cursor")
@@ -474,6 +488,7 @@ def run_record_mode(output: str) -> None:
         if event.kind == "trigger":
             try:
                 from pynput.mouse import Controller as MouseCtrl
+
                 mouse = MouseCtrl()
                 x, y = mouse.position
                 path, sel = capture_at_point(float(x), float(y))
@@ -513,9 +528,7 @@ def run_record_mode(output: str) -> None:
                 )
             nodes.extend(new_nodes)
 
-            logger.info(
-                "[CTRL] continue  [ESC] discard  [Ctrl+Shift+F2] finish..."
-            )
+            logger.info("[CTRL] continue  [ESC] discard  [Ctrl+Shift+F2] finish...")
 
     if not nodes:
         logger.info("No captures taken.")

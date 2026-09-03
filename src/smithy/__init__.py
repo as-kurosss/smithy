@@ -10,7 +10,7 @@ from smithy.core.errors import (
 from smithy.core.tool import AbstractTool, Tool, tool
 from smithy.facade import ClickResult, ProcessHandle, Smithy
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "AbstractTool",

@@ -434,7 +434,7 @@ class TestGenerateNodes:
         nodes = generate_nodes(sel, ToolType.WAIT, params)
         assert len(nodes) == 1
         assert nodes[0].tool == "windows.wait"
-        assert nodes[0].args["duration_ms"] == 2000
+        assert nodes[0].args["timeout_ms"] == 2000
 
     def test_click_node_contains_all_selector_fields(self) -> None:
         sel = _sample_selector()
@@ -481,7 +481,7 @@ class TestGenerateActionConfig:
         sel = _sample_selector()
         params = GenerateParams(duration_ms=500)
         cfg = generate_action_config(sel, ToolType.WAIT, params)
-        assert cfg == {"duration_ms": 500}
+        assert cfg == {"timeout_ms": 500}
 
     def test_click_action_no_output_key(self) -> None:
         sel = BestSelector(control_type="Pane")
@@ -592,7 +592,10 @@ class TestCaptureAtPoint:
         mock_child.ClassName = "BtnCls"
         mock_child.AutomationId = "btnOk"
         mock_child.BoundingRectangle = MagicMock(
-            left=100, top=200, right=300, bottom=400,
+            left=100,
+            top=200,
+            right=300,
+            bottom=400,
         )
         mock_child.GetFirstChildControl.return_value = None
         mock_child.GetNextSiblingControl.return_value = None
@@ -627,10 +630,13 @@ class TestCaptureAtPoint:
         mock_auto = MagicMock()
         mock_auto.GetRootControl.return_value = None
 
-        with patch(
-            "smithy.windows.tools.selector_capture.capture.auto",
-            mock_auto,
-        ), pytest.raises(RuntimeError, match="root"):
+        with (
+            patch(
+                "smithy.windows.tools.selector_capture.capture.auto",
+                mock_auto,
+            ),
+            pytest.raises(RuntimeError, match="root"),
+        ):
             capture_at_point(100, 100)
 
     def test_single_node_path(self) -> None:

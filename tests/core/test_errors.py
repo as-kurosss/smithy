@@ -1,6 +1,5 @@
 """Tests for smithy.core.errors."""
 
-
 from smithy.core.errors import (
     Cancelled,
     ContextError,

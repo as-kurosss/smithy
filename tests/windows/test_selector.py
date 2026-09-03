@@ -155,4 +155,3 @@ class TestClickTool:
             pytest.raises((ElementNotFound, PlatformError)),
         ):
             await tool.execute({})
-

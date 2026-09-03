@@ -11,6 +11,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from typing import assert_never
 
 from smithy.windows.tools.selector_capture.capture import BestSelector
 
@@ -70,6 +71,7 @@ class FlowNode:
         args: Configuration dictionary the tool expects.
         full_path: Complete UIA element path from desktop root to the target.
     """
+
     tool: str
     args: Mapping[str, object] = field(default_factory=dict)
     full_path: Sequence[Mapping[str, object]] = field(default_factory=list)
@@ -130,6 +132,8 @@ def generate_nodes(
                     args=build_wait_config(params.duration_ms),
                 ),
             ]
+        case _:
+            assert_never(tool)
 
 
 def generate_action_config(
@@ -154,6 +158,8 @@ def generate_action_config(
             return build_inline_selector(selector, text=params.text)
         case ToolType.WAIT:
             return build_wait_config(params.duration_ms)
+        case _:
+            assert_never(tool)
 
 
 # ---------------------------------------------------------------------------
@@ -206,9 +212,10 @@ def build_wait_config(duration_ms: int) -> dict[str, int]:
     """Build a ``windows.wait`` config.
 
     Args:
-        duration_ms: How long to wait in milliseconds.
+        duration_ms: How long to wait in milliseconds (mapped to
+            ``timeout_ms`` which is the field ``windows.wait`` accepts).
 
     Returns:
         A configuration dictionary for ``windows.wait``.
     """
-    return {"duration_ms": duration_ms}
+    return {"timeout_ms": duration_ms}

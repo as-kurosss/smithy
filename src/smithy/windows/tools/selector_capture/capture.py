@@ -12,7 +12,12 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-import uiautomation as auto
+try:
+    import uiautomation as auto
+except Exception:  # pragma: no cover — optional Windows backend
+    auto = None  # type: ignore[assignment]
+
+from smithy.core.errors import PlatformError
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +25,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True, slots=True)
 class PathNode:
@@ -122,6 +128,7 @@ class CaptureRecord:
 # ---------------------------------------------------------------------------
 # Element helpers
 # ---------------------------------------------------------------------------
+
 
 def read_node(element: Any) -> PathNode:
     """Read the identifying UIA properties of *element* into a :class:`PathNode`.
@@ -231,6 +238,7 @@ def contains_point(element: Any, x: int, y: int) -> bool:
 # Tree traversal
 # ---------------------------------------------------------------------------
 
+
 def find_deepest_at_point(
     root: Any,
     x: int,
@@ -275,6 +283,7 @@ def find_deepest_at_point(
 # Selector extraction
 # ---------------------------------------------------------------------------
 
+
 def best_selector_from_path(path: list[PathNode]) -> BestSelector:
     """Extract a :class:`BestSelector` from the target (last) node of *path*.
 
@@ -304,6 +313,7 @@ def best_selector_from_path(path: list[PathNode]) -> BestSelector:
 # Main capture API
 # ---------------------------------------------------------------------------
 
+
 def capture_at_point(
     x: float,
     y: float,
@@ -330,6 +340,11 @@ def capture_at_point(
     ix = int(x)
     iy = int(y)
 
+    if auto is None:
+        raise PlatformError(
+            "UIAutomation backend is not available. "
+            "Install it with: pip install uiautomation (Windows only)."
+        )
     root = auto.GetRootControl()
     if root is None:
         msg = "Failed to obtain the UIA root element"
@@ -369,7 +384,4 @@ def path_to_dicts(path: list[PathNode]) -> list[dict[str, Any]]:
     Returns:
         A list of dicts suitable for JSON serialisation.
     """
-    return [
-        {k: v for k, v in asdict(node).items() if v is not None}
-        for node in path
-    ]
+    return [{k: v for k, v in asdict(node).items() if v is not None} for node in path]

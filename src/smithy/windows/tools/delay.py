@@ -38,7 +38,13 @@ class DelayTool(AbstractTool):
         config: dict[str, Any],
     ) -> Any:
         duration_ms = config.get("duration_ms")
-        if duration_ms is None or duration_ms < 1:
+        if isinstance(duration_ms, bool) or not isinstance(duration_ms, int):
+            raise InvalidInput(
+                "Missing or invalid 'duration_ms': expected a positive integer",
+                param="duration_ms",
+                input_value=duration_ms,
+            )
+        if duration_ms < 1:
             raise InvalidInput(
                 "Missing or invalid 'duration_ms'",
                 param="duration_ms",

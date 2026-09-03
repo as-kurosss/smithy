@@ -28,10 +28,6 @@ class GetElementTool(AbstractTool):
         return {
             "type": "object",
             "properties": {
-                "element_key": {
-                    "type": "string",
-                    "description": "Key in context with UIElement",
-                },
                 "name": {"type": "string", "description": "Element name to find"},
                 "automation_id": {
                     "type": "string",
@@ -53,7 +49,8 @@ class GetElementTool(AbstractTool):
         element = await resolve_element(config)
         if element is None:
             raise ElementNotFound(
-                "No element found: provide element_key or selector fields",
+                "No element found: provide selector fields "
+                "(name, automation_id, control_type, class_name, pid)",
                 selector=config,
             )
 

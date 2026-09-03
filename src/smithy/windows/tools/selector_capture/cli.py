@@ -33,7 +33,8 @@ def main(argv: list[str] | None = None) -> None:
         description="Capture UI element selectors and generate flow configs",
     )
     parser.add_argument(
-        "-B", "--backend",
+        "-B",
+        "--backend",
         default="windows",
         help="Platform backend (default: windows)",
     )
@@ -45,14 +46,17 @@ def main(argv: list[str] | None = None) -> None:
     p_single.add_argument("-o", "--output", default="selectors.json", help="Output JSON file")
     p_single.add_argument("-d", "--description", help="Description for the capture")
     p_single.add_argument(
-        "-t", "--tool",
+        "-t",
+        "--tool",
         choices=[t.value for t in ToolType],
         default="click",
         help="Tool type for config generation (default: click)",
     )
     p_single.add_argument("--text", default="", help="Text for input_text / set_text")
     p_single.add_argument(
-        "--duration-ms", type=int, default=1000,
+        "--duration-ms",
+        type=int,
+        default=1000,
         help="Duration for wait tool (ms)",
     )
     p_single.add_argument("--clip", action="store_true", help="Copy config to clipboard")
@@ -77,9 +81,8 @@ def main(argv: list[str] | None = None) -> None:
         parser.print_help()
         sys.exit(1)
 
-    tool_type = ToolType(args.tool)
-
     if args.command == "single":
+        tool_type = ToolType(args.tool)
         run_single_mode(
             output=args.output,
             description=args.description,

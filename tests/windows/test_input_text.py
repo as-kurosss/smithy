@@ -1,9 +1,17 @@
 """Tests for smithy.windows.tools.input_text — plain text only."""
 
-from smithy.windows.tools.input_text import _send
+import pytest
+
+from smithy.core.errors import InvalidInput
+from smithy.windows.tools.input_text import InputTextTool, _send
 
 
 class TestInputText:
     def test_send_exists(self) -> None:
         # _send should be importable and callable
         assert callable(_send)
+
+    @pytest.mark.asyncio
+    async def test_missing_text_rejected(self) -> None:
+        with pytest.raises(InvalidInput, match="text"):
+            await InputTextTool().execute({})

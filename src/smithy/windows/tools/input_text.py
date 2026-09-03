@@ -45,13 +45,10 @@ class InputTextTool(AbstractTool):
                     "type": "string",
                     "description": "Plain text to type.",
                 },
-                "element_key": {
-                    "type": "string",
-                    "description": "Key in context with UIElement",
-                },
                 "name": {"type": "string", "description": "Element name to find"},
                 "automation_id": {
-                    "type": "string", "description": "UI Automation identifier",
+                    "type": "string",
+                    "description": "UI Automation identifier",
                 },
                 "control_type": {"type": "string", "description": "Control type"},
                 "class_name": {"type": "string", "description": "Window class name"},
@@ -65,8 +62,12 @@ class InputTextTool(AbstractTool):
         config: dict[str, Any],
     ) -> Any:
         raw = config.get("text")
-        if not raw:
-            raise InvalidInput("Missing required parameter: text", param="text")
+        if not isinstance(raw, str) or not raw:
+            raise InvalidInput(
+                "Missing required parameter: text (expected a non-empty string)",
+                param="text",
+                input_value=raw,
+            )
 
         loop = asyncio.get_running_loop()
 

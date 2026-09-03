@@ -144,6 +144,7 @@ class TestToolRegistry:
     def test_register_overwrites(self) -> None:
         reg = ToolRegistry()
         reg.register(StubTool(tool_name="x", output="first"))
-        reg.register(StubTool(tool_name="x", output="second"))
+        with pytest.warns(UserWarning, match="already registered"):
+            reg.register(StubTool(tool_name="x", output="second"))
         assert reg.get("x") is not None
         # The second registration should overwrite

@@ -6,11 +6,10 @@ from typing import Any
 
 import pytest
 
-from smithy.core.events import EventBus, ToolEvent
 from smithy.core.errors import InvalidInput
+from smithy.core.events import EventBus, ToolEvent
 from smithy.core.tool import AbstractTool
-from smithy.facade import ProcessHandle, Smithy
-
+from smithy.facade import Smithy
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -150,8 +149,7 @@ class TestEventBus:
 
 
 class TestSmithyMiddleware:
-    @pytest.mark.asyncio
-    async def test_add_middleware(self) -> None:
+    def test_add_middleware(self) -> None:
         bus = EventBus()
 
         async def noop(event: ToolEvent) -> ToolEvent:

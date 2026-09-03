@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 from smithy.core.errors import InvalidInput
@@ -18,7 +19,17 @@ class ToolRegistry:
         self._tools: dict[str, Tool] = {}
 
     def register(self, tool: Tool) -> None:
-        """Register a tool by its name property."""
+        """Register a tool by its name property.
+
+        Re-registering an existing name overwrites the previous tool
+        and emits a ``UserWarning`` so silent replacement is explicit.
+        """
+        if tool.name in self._tools:
+            warnings.warn(
+                f"Tool {tool.name!r} is already registered and will be overwritten",
+                UserWarning,
+                stacklevel=2,
+            )
         self._tools[tool.name] = tool
 
     def get(self, name: str) -> Tool | None:

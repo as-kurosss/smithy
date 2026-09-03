@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from functools import wraps
 from typing import Any, Protocol, runtime_checkable
-
 
 
 @runtime_checkable
@@ -66,7 +65,7 @@ class AbstractTool(ABC):
 def tool(
     tool_name: str,
     tool_description: str = "",
-) -> Callable[[Any], AbstractTool]:
+) -> Callable[[Callable[[dict[str, Any]], Any]], AbstractTool]:
     """Decorator to create a Tool from a function.
 
     Usage::
@@ -87,10 +86,9 @@ def tool(
         An AbstractTool instance ready for registration.
     """
 
-    def decorator(fn: Any) -> AbstractTool:
-        doc = tool_description or (fn.__doc__ or "")
+    def decorator(fn: Callable[[dict[str, Any]], Any]) -> AbstractTool:
+        doc = tool_description or (getattr(fn, "__doc__", None) or "")
 
-        @wraps(fn)
         class _DecoratedTool(AbstractTool):
             @property
             def name(self) -> str:
@@ -104,8 +102,13 @@ def tool(
                 self,
                 config: dict[str, Any],
             ) -> Any:
-                return await fn(config)
+                result = fn(config)
+                if inspect.isawaitable(result):
+                    return await result
+                return result
 
-        return _DecoratedTool()
+        instance = _DecoratedTool()
+        instance.__wrapped__ = fn  # type: ignore[attr-defined]
+        return instance
 
     return decorator

@@ -8,7 +8,7 @@ import re
 import time
 from typing import Any
 
-from smithy.core.errors import InvalidInput
+from smithy.core.errors import InvalidInput, PlatformError
 from smithy.core.tool import AbstractTool
 from smithy.windows.tools._resolve import resolve_element
 
@@ -161,11 +161,7 @@ def _send_unicode(char: str) -> None:
     )
     up = _INPUT(
         _INPUT_KEYBOARD,
-        _InputUnion(
-            ki=_KEYBDINPUT(
-                0, scan, _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP, 0, None
-            )
-        ),
+        _InputUnion(ki=_KEYBDINPUT(0, scan, _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP, 0, None)),
     )
     ctypes.windll.user32.SendInput(1, ctypes.byref(down), ctypes.sizeof(down))
     ctypes.windll.user32.SendInput(1, ctypes.byref(up), ctypes.sizeof(up))
@@ -227,10 +223,6 @@ class KeyboardTool(AbstractTool):
                         "Everything else is literal text."
                     ),
                 },
-                "element_key": {
-                    "type": "string",
-                    "description": "Key in context with UIElement",
-                },
                 "name": {"type": "string", "description": "Element name to find"},
                 "automation_id": {
                     "type": "string",
@@ -248,8 +240,12 @@ class KeyboardTool(AbstractTool):
         config: dict[str, Any],
     ) -> Any:
         raw = config.get("keys")
-        if not raw:
-            raise InvalidInput("Missing required parameter: keys", param="keys")
+        if not isinstance(raw, str) or not raw:
+            raise InvalidInput(
+                "Missing required parameter: keys (expected a non-empty string)",
+                param="keys",
+                input_value=raw,
+            )
 
         keys = normalize_keys(raw)
         loop = asyncio.get_running_loop()
@@ -258,5 +254,18 @@ class KeyboardTool(AbstractTool):
         if element is not None:
             await loop.run_in_executor(None, element.SetFocus)
 
-        await loop.run_in_executor(None, _send, keys)
+        try:
+            await loop.run_in_executor(None, _send, keys)
+        except ValueError as exc:
+            raise InvalidInput(
+                f"Unknown key in {raw!r}: {exc}",
+                param="keys",
+                input_value=raw,
+            ) from exc
+        except Exception as exc:
+            raise PlatformError(
+                f"Failed to send keys for {raw!r}",
+                source=exc,
+                input_value=raw,
+            ) from exc
         return {"status": "sent", "keys": raw, "normalized": keys}
