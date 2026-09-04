@@ -149,6 +149,29 @@ except PlatformError as e:
     print(f"Platform error: {e}")
 ```
 
+## Selector Ranking (Playwright-style)
+
+Record mode (`record` below) ranks every captured element like
+Playwright's codegen: candidates in priority order (automation ID →
+name + type → class + type), stability scoring, and a live uniqueness
+check. The winning selector ships with `high`/`medium`/`low` confidence
+plus warnings — `low` means the element needs an anchor, not blind trust:
+
+```python
+from smithy.windows.selector_rank import rank_best_selector
+from smithy.windows.tools.selector_capture.capture import capture_at_point
+
+_, sel = capture_at_point(400, 300)
+ranked = rank_best_selector(sel)
+print(ranked.config)  # e.g. {"automation_id": "btnOk"}
+print(ranked.confidence, ranked.warnings)
+```
+
+`resolve_element(..., strict=True)` fails on ambiguous selectors (2+
+matches) instead of taking the first — the desktop equivalent of strict
+mode. Numeric control types from real captures (`"50000"`) are
+translated to names automatically.
+
 ## Selector Capture
 
 A dev utility for inspecting UI elements at screen coordinates and generating tool configs:
@@ -156,7 +179,7 @@ A dev utility for inspecting UI elements at screen coordinates and generating to
 ```bash
 pip install smithy[capture]
 
-# Single capture mode
+# Single capture mode — one flow node
 python -m smithy.windows.tools.selector_capture single -o selectors.json
 
 # Series mode — auto-record clicks and typing
@@ -165,6 +188,14 @@ python -m smithy.windows.tools.selector_capture series -o recording.json
 # Interactive record mode
 python -m smithy.windows.tools.selector_capture record -o flow.json
 ```
+
+All three modes write the same shape — `{"tool": "selector-capture",
+"nodes": [{"tool", "args", "full_path"}]}` (`single` is just a
+one-node flow). `args` holds the ranked minimal selector (the
+`best_selector` equivalent), `full_path` the full UIA path for debugging
+and anchors. Note: series mode records click targets with full paths,
+but keyboard input captures only the target element, not the typed text
+itself — fill in `text` afterwards or use record mode.
 
 ## Install
 
@@ -214,7 +245,8 @@ src/smithy/
 │   └── errors.py        — Error hierarchy (ToolError, ElementNotFound, etc.)
 └── windows/
     ├── element.py       — SafeUIElement (thread-safe COM wrapper)
-    ├── selector.py      — ElementSelector (UIA tree search)
+    ├── selector.py      — ElementSelector (UIA tree search + match counting)
+    ├── selector_rank.py — Selector ranking (candidates, scoring, confidence)
     └── tools/
         ├── process.py          — ProcessTool
         ├── click.py            — ClickTool (button/clicks/coordinates)

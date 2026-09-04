@@ -138,6 +138,21 @@ class TestToolValidation:
 
 
 class TestCliDispatch:
+    def test_single_dispatches_with_tool_defaults(self, tmp_path: Any) -> None:
+        from smithy.windows.tools.selector_capture.generate import ToolType
+
+        out = str(tmp_path / "sel.json")
+        with patch("smithy.windows.tools.selector_capture.cli.run_single_mode") as run:
+            main(["single", "-o", out])
+        run.assert_called_once_with(
+            output=out,
+            description=None,
+            tool_type=ToolType.CLICK,
+            text="",
+            duration_ms=1000,
+            clip=False,
+        )
+
     def test_series_dispatches_without_tool_arg(self, tmp_path: Any) -> None:
         out = str(tmp_path / "rec.json")
         with patch("smithy.windows.tools.selector_capture.cli.run_series_mode") as run:

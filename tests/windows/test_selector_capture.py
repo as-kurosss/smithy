@@ -673,3 +673,100 @@ class TestFlowNodeFullPath:
         fp = [{"control_type": "Window", "name": "Main"}]
         node = FlowNode(tool="windows.click", args={}, full_path=fp)
         assert node.full_path == fp
+
+
+# ===================================================================
+# Recorder output unification (single/series/record → nodes)
+# ===================================================================
+
+
+class TestNodesForCapture:
+    """Tests for :func:`_nodes_for_capture` — one capture, one node shape."""
+
+    def test_ranked_config_used_with_full_path(self) -> None:
+        from smithy.windows.selector_rank import RankedSelector
+        from smithy.windows.tools.selector_capture.recorder import (
+            _nodes_for_capture,
+        )
+
+        ranked = RankedSelector(
+            config={"name": "OK", "control_type": "button"},
+            strategy="name+type",
+            score=70,
+            confidence="medium",
+            unique=True,
+            match_count=1,
+        )
+        nodes = _nodes_for_capture(
+            BestSelector(control_type="50000", name="OK"),
+            [PathNode(control_type="Window", name="Main")],
+            ToolType.CLICK,
+            GenerateParams(),
+            ranked,
+        )
+        assert len(nodes) == 1
+        assert nodes[0].tool == "windows.click"
+        assert nodes[0].args == {"name": "OK", "control_type": "button"}
+        assert nodes[0].full_path == [{"control_type": "Window", "name": "Main"}]
+
+    def test_fallback_unranked_translates_numeric_type(self) -> None:
+        from smithy.windows.tools.selector_capture.recorder import (
+            _nodes_for_capture,
+        )
+
+        nodes = _nodes_for_capture(
+            BestSelector(control_type="50000", name="OK"),
+            [PathNode(control_type="Window")],
+            ToolType.CLICK,
+            GenerateParams(),
+            None,
+        )
+        assert nodes[0].args == {"name": "OK", "control_type": "button"}
+        assert nodes[0].full_path == [{"control_type": "Window"}]
+
+    def test_empty_path_gives_empty_full_path(self) -> None:
+        from smithy.windows.selector_rank import RankedSelector
+        from smithy.windows.tools.selector_capture.recorder import (
+            _nodes_for_capture,
+        )
+
+        ranked = RankedSelector(
+            config={"name": "OK"},
+            strategy="name",
+            score=60,
+            confidence="medium",
+            unique=True,
+            match_count=1,
+        )
+        nodes = _nodes_for_capture(
+            BestSelector(control_type="", name="OK"),
+            None,
+            ToolType.CLICK,
+            GenerateParams(),
+            ranked,
+        )
+        assert nodes[0].full_path == []
+
+
+class TestSeriesInputFlush:
+    """Tests for :func:`_input_text_nodes` — keyboard flushes keep full_path."""
+
+    def test_input_nodes_keep_full_path(self) -> None:
+        from smithy.windows.tools.selector_capture.recorder import (
+            _input_text_nodes,
+        )
+
+        sel = BestSelector(
+            control_type="Edit",
+            name="Field",
+            class_name="EditCls",
+            automation_id="ed1",
+        )
+        fp = [{"control_type": "Window", "name": "Main"}]
+        nodes = _input_text_nodes(sel, fp)
+        assert len(nodes) == 1
+        assert nodes[0].tool == "windows.input_text"
+        assert nodes[0].full_path == fp
+        assert nodes[0].args["automation_id"] == "ed1"
+        # Series mode records the target, not the pressed keys.
+        assert "text" not in nodes[0].args

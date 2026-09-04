@@ -1,5 +1,56 @@
 # Changelog
 
+## 0.4.1
+
+Unified capture output: every recorder mode writes the same flow shape.
+
+### Changed
+
+- `single` mode now writes `{"tool": "selector-capture", "nodes":
+  [...]}` with one ranked node (same shape as `series`/`record`)
+  instead of the divergent `captures`/`best_selector` format. The node
+  `args` is the ranked minimal selector, `full_path` is attached, and
+  numeric control types are translated — previously `best_selector`
+  carried the raw `"50011"` the runtime rejects. The `-d`/
+  `--description` flag is still accepted but only logged, not persisted.
+
+### Fixed
+
+- Series-mode `windows.input_text` nodes were missing `full_path`
+  (keyboard flushes built nodes without the last clicked element's
+  path) — now every node carries it. Known limitation, now documented:
+  series mode captures the input *target*, not the typed text itself.
+
+## 0.4.0
+
+Playwright-style selector engine for the desktop: ranked selectors with
+uniqueness checks and honest confidence instead of all-fields dumps.
+
+### Added
+
+- Selector ranking (`windows/selector_rank.py`): candidate generation in
+  priority order (automation ID → name + type → class + type, minimal
+  first), static stability scoring (dynamic digits/dates, wildcards, hex
+  runs, long names), live-desktop uniqueness check, `high`/`medium`/`low`
+  confidence with warnings. Low confidence means "add an anchor", never
+  a made-up stable selector.
+- `ElementSelector.count_from_desktop(limit)` — bounded tree walk for
+  counting matches (strict-mode primitive; dev-time helper, not a runtime
+  search path).
+- `resolve_element(..., strict=True)` — fail on ambiguous selectors
+  (2+ matches → `InvalidInput`) instead of silently taking the first.
+- `generate_nodes_from_config()` — flow nodes from an already-ranked
+  minimal config.
+- Record mode now ranks every capture: logs the winning selector,
+  confidence, and warnings, and emits nodes from the ranked config
+  (falls back to the unranked dump if the UIA walk fails).
+
+### Fixed
+
+- Real captures carry numeric control types (`"50000"`) which the
+  runtime rejects — `build_inline_selector` now translates them to names
+  (`"button"`) and drops untranslatable ones.
+
 ## 0.3.0
 
 GUI batch: comfortable desktop automation on top of the 0.2.0 core.

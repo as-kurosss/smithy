@@ -132,6 +132,59 @@ class ElementSelector:
         root = auto.GetRootControl()
         return self.find_first(root, auto.uiautomation)
 
+    def count_from_desktop(self, limit: int = 2) -> int:
+        """Count matching elements under the desktop root, up to *limit*.
+
+        A bounded Python tree walk (stops as soon as *limit* matches are
+        found) used to check selector uniqueness — the desktop equivalent
+        of Playwright's strict mode. Slower than the native ``FindControl``
+        used by :meth:`find_from_desktop`, so this is a dev-time / validation
+        helper, not a runtime search path.
+
+        Args:
+            limit: Stop counting after this many matches (must be >= 1).
+
+        Returns:
+            Number of matches, capped at *limit*.
+
+        Raises:
+            PlatformError: If UIA init fails.
+        """
+        if limit < 1:
+            limit = 1
+        try:
+            import uiautomation as auto
+        except Exception as exc:
+            raise PlatformError(
+                "UIAutomation init failed",
+                source=exc,
+            ) from exc
+
+        compare = self._build_compare()
+        count = 0
+        stack: list[Any] = [auto.GetRootControl()]
+        while stack:
+            node = stack.pop()
+            try:
+                matched = compare(node, 0)
+            except Exception:
+                matched = False
+            if matched:
+                count += 1
+                if count >= limit:
+                    return count
+            try:
+                child = node.GetFirstChildControl()
+            except Exception:
+                continue
+            while child is not None:
+                stack.append(child)
+                try:
+                    child = child.GetNextSiblingControl()
+                except Exception:
+                    break
+        return count
+
     def _build_compare(self) -> Callable[[Any, int], bool]:
         """Build a compare function for FindControl."""
         # Capture values for the closure

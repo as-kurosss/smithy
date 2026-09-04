@@ -180,6 +180,8 @@ def build_inline_selector(
         3. ``class_name`` + ``control_type`` — fallback.
 
     ``control_type`` is included when available **and** not ``Custom``.
+    Numeric UIA ids from real captures (``"50000"``) are translated to
+    names — the runtime rejects raw numbers.
 
     Args:
         selector: The best-effort selector for a UI element.
@@ -188,6 +190,8 @@ def build_inline_selector(
     Returns:
         A configuration dictionary with inline selector fields.
     """
+    from smithy.windows.selector_rank import control_type_display
+
     config: dict[str, object] = {}
 
     if selector.automation_id:
@@ -196,8 +200,9 @@ def build_inline_selector(
     if selector.name:
         config["name"] = selector.name
 
-    if selector.control_type and selector.control_type != "Custom":
-        config["control_type"] = selector.control_type
+    control_type = control_type_display(selector.control_type)
+    if control_type and control_type != "Custom":
+        config["control_type"] = control_type
 
     if selector.class_name:
         config["class_name"] = selector.class_name
@@ -206,6 +211,54 @@ def build_inline_selector(
         config["text"] = text
 
     return config
+
+
+def generate_nodes_from_config(
+    config: Mapping[str, object],
+    tool: ToolType,
+    params: GenerateParams,
+) -> list[FlowNode]:
+    """Generate a :class:`FlowNode` from an already-ranked selector config.
+
+    Same tool mapping as :func:`generate_nodes`, but the selector fields
+    come from :mod:`smithy.windows.selector_rank` (minimal + verified
+    unique) instead of the maximal all-fields dump.
+
+    Args:
+        config: Ranked inline selector fields (no ``text`` key — it comes
+            from *params*).
+        tool: The target tool type.
+        params: Generation parameters (text, duration).
+
+    Returns:
+        A list of :class:`FlowNode` objects forming the tool sequence.
+    """
+    match tool:
+        case ToolType.CLICK:
+            return [FlowNode(tool="windows.click", args=dict(config))]
+        case ToolType.INPUT_TEXT:
+            return [
+                FlowNode(
+                    tool="windows.input_text",
+                    args={**dict(config), "text": params.text},
+                )
+            ]
+        case ToolType.SET_TEXT:
+            return [
+                FlowNode(
+                    tool="windows.set_text",
+                    args={**dict(config), "text": params.text},
+                )
+            ]
+        case ToolType.WAIT:
+            return [
+                FlowNode(
+                    tool="windows.wait",
+                    args=build_wait_config(params.duration_ms),
+                )
+            ]
+        case _:
+            assert_never(tool)
 
 
 def build_wait_config(duration_ms: int) -> dict[str, int]:

@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 from typing import Any
 
-from smithy.core.errors import InvalidInput
+from smithy.core.errors import ElementNotFound, InvalidInput
 from smithy.windows.selector import ElementSelector, parse_control_type
 
 
@@ -90,16 +90,26 @@ def _element_center(element: Any) -> tuple[int, int]:
     return ((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
 
 
-async def resolve_element(config: dict[str, Any]) -> Any:
+async def resolve_element(config: dict[str, Any], *, strict: bool = False) -> Any:
     """Resolve a UI element from inline selector fields.
+
+    Args:
+        config: Inline selector fields (name, automation_id, control_type,
+            class_name, pid).
+        strict: When ``True``, fail on ambiguous selectors that match more
+            than one element (Playwright strict-mode equivalent) instead of
+            silently taking the first match. Costs an extra bounded tree
+            walk — a validation aid, not the default runtime path.
 
     Returns:
         A raw ``uiautomation`` control, or ``None`` if no selector
         fields were given.
 
     Raises:
-        InvalidInput: If ``element_key`` is used — context-based lookup
-            is not implemented; use inline selector fields instead.
+        InvalidInput: If ``element_key`` is used, or (with ``strict``) the
+            selector matches more than one element.
+        ElementNotFound: If nothing matches (with ``strict``, raised here
+            instead of inside ``find_from_desktop``).
     """
     if "element_key" in config:
         raise InvalidInput(
@@ -113,4 +123,18 @@ async def resolve_element(config: dict[str, Any]) -> Any:
         return None
 
     loop = asyncio.get_running_loop()
+    if strict:
+        matches = await loop.run_in_executor(None, selector.count_from_desktop, 2)
+        if matches == 0:
+            raise ElementNotFound(
+                "No element found matching selector",
+                selector=config,
+            )
+        if matches > 1:
+            raise InvalidInput(
+                "Ambiguous selector: matches 2+ elements — "
+                "narrow it (add automation_id or control_type)",
+                param=None,
+                input_value=config,
+            )
     return await loop.run_in_executor(None, selector.find_from_desktop)

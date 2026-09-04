@@ -3,11 +3,16 @@
 Ported from ``selector-capture/src/recorder.rs``.
 
 Modes:
-    single  — CTRL alone to capture the element under cursor.  ESC to cancel.
+    single  — CTRL alone to capture the element under cursor (one flow
+              node).  ESC to cancel.
     series  — automatically record every mouse click & text input;
               Ctrl+Shift+F2 to stop.
     record  — capture one element at a time with interactive prompts
               for tool type and parameters; Ctrl+Shift+F2 to finish.
+
+All modes write the same shape — ``{"tool": "selector-capture",
+"nodes": [...]}`` — so ``single`` is just a one-node flow and every
+file replays the same way.
 
 Uses ``pynput`` for global keyboard/mouse hooks and ``pyperclip``
 for clipboard access.
@@ -18,13 +23,16 @@ from __future__ import annotations
 import json
 import logging
 import queue
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from smithy.windows.selector_rank import RankedSelector
 
 from smithy.windows.tools.selector_capture.capture import (
     BestSelector,
-    CaptureRecord,
+    PathNode,
     capture_at_point,
     path_to_dicts,
 )
@@ -32,8 +40,9 @@ from smithy.windows.tools.selector_capture.generate import (
     FlowNode,
     GenerateParams,
     ToolType,
-    generate_action_config,
+    build_inline_selector,
     generate_nodes,
+    generate_nodes_from_config,
 )
 
 try:
@@ -266,6 +275,59 @@ def _copy_to_clipboard(text: str) -> bool:
         return False
 
 
+# ── Shared capture → nodes helpers ───────────────────────────────────────────
+
+
+def _log_ranked(ranked: RankedSelector | None, sel: BestSelector) -> None:
+    """Log the winning selector, its confidence, and any warnings."""
+    logger.info(
+        "  selector: %s (confidence: %s)",
+        ranked.config if ranked is not None else build_inline_selector(sel),
+        ranked.confidence if ranked is not None else "unknown",
+    )
+    if ranked is not None:
+        for warning in ranked.warnings:
+            logger.warning("  ! %s", warning)
+
+
+def _nodes_for_capture(
+    sel: BestSelector,
+    path: list[PathNode] | None,
+    tool: ToolType,
+    params: GenerateParams,
+    ranked: RankedSelector | None,
+) -> list[FlowNode]:
+    """Build flow nodes for one capture, with the full UIA path attached.
+
+    Shared by single and record modes so one capture always yields the
+    same nodes shape. Uses the ranked minimal config when available,
+    otherwise the unranked all-fields dump.
+    """
+    path_dicts = path_to_dicts(path) if path else []
+    if ranked is not None and tool.needs_selector:
+        generated = generate_nodes_from_config(ranked.config, tool, params)
+    else:
+        generated = generate_nodes(sel, tool, params)
+    return [FlowNode(tool=n.tool, args=n.args, full_path=path_dicts) for n in generated]
+
+
+def _input_text_nodes(
+    selector: BestSelector,
+    path_dicts: Sequence[Mapping[str, Any]],
+) -> list[FlowNode]:
+    """Build ``input_text`` nodes for series-mode keyboard flushes.
+
+    Series mode only knows *that* text was typed (not the keys), so the
+    node carries the selector of the last clicked element with its full
+    path and no ``text`` — fill it in, or re-record the step in record
+    mode.
+    """
+    return [
+        FlowNode(tool=n.tool, args=n.args, full_path=list(path_dicts))
+        for n in generate_nodes(selector, ToolType.INPUT_TEXT, GenerateParams())
+    ]
+
+
 # ── SINGLE MODE ──────────────────────────────────────────────────────────────
 
 
@@ -279,12 +341,16 @@ def run_single_mode(
 ) -> None:
     """Run single-capture mode.
 
-    CTRL alone → capture element under cursor, generate config, save.
+    CTRL alone → capture element under cursor, generate one flow node, save.
     ESC → cancel.
 
+    The output shape matches series/record modes (``nodes`` with a single
+    entry) so every capture file replays the same way.
+
     Args:
-        output: Path to the output JSON file.
-        description: Optional human-readable description for the capture.
+        output: Path to the output JSON file (overwritten).
+        description: Accepted for backward compatibility; logged but not
+            persisted (flow nodes carry no description field).
         tool_type: Tool type for config generation.
         text: Text for ``input_text`` / ``set_text`` tools.
         duration_ms: Duration in ms for the ``wait`` tool.
@@ -301,6 +367,7 @@ def run_single_mode(
     logger.info("Waiting for CTRL...")
 
     selector: BestSelector | None = None
+    path: list[PathNode] | None = None
 
     while True:
         try:
@@ -330,31 +397,32 @@ def run_single_mode(
         logger.info("Cancelled.")
         return
 
-    label = selector.label()
-    logger.info("Captured: %s", label)
+    if description:
+        logger.info("Description: %s", description)
+    logger.info("Captured: %s", selector.label())
 
     params = GenerateParams(
         text=text,
         duration_ms=duration_ms,
     )
+    ranked = _rank_captured(selector)
+    _log_ranked(ranked, selector)
+    nodes = _nodes_for_capture(selector, path, tool_type, params, ranked)
+    for node in nodes:
+        logger.info(
+            "    -> %s: %s",
+            node.tool,
+            json.dumps(node.args, ensure_ascii=False),
+        )
 
     if clip:
-        action_cfg = generate_action_config(selector, tool_type, params)
-        clip_text = json.dumps(action_cfg, ensure_ascii=False)
+        clip_text = json.dumps(nodes[0].args, ensure_ascii=False)
 
         if _copy_to_clipboard(clip_text):
             logger.info("Copied to clipboard (%s)", tool_type.value)
 
-    # Save to file (CaptureRecord format for backward compat).
-    record = CaptureRecord(
-        id=f"capture-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}",
-        timestamp=datetime.now(UTC).isoformat(),
-        description=description,
-        full_path=path if path else [],
-        best_selector=selector,
-    )
-    _append_capture(output, record)
-    logger.info("Saved to %s", output)
+    _write_flow_output(output, nodes)
+    logger.info("Saved flow to %s", output)
 
 
 # ── SERIES MODE ──────────────────────────────────────────────────────────────
@@ -365,6 +433,10 @@ def run_series_mode(output: str) -> None:
 
     Automatically records every mouse click and keyboard input.
     Ctrl+Shift+F2 → stop and save as flow nodes.
+
+    Note: keyboard input records the *target element* (with its full
+    path) but not the typed text itself — it only knows that keys were
+    pressed. Fill in ``text`` afterwards, or use record mode.
 
     Args:
         output: Path to the output JSON file.
@@ -383,6 +455,7 @@ def run_series_mode(output: str) -> None:
     nodes: list[FlowNode] = []
     pending_input = False
     last_selector: BestSelector | None = None
+    last_path: list[dict[str, Any]] = []
 
     while True:
         try:
@@ -393,15 +466,13 @@ def run_series_mode(output: str) -> None:
         if event.kind == "stop":
             # Flush pending text input before stopping.
             if pending_input and last_selector is not None:
-                params = GenerateParams()
-                nodes.extend(generate_nodes(last_selector, ToolType.INPUT_TEXT, params))
+                nodes.extend(_input_text_nodes(last_selector, last_path))
             break
 
         if event.kind == "mouse_down":
             # Flush pending input before handling click.
             if pending_input and last_selector is not None:
-                params = GenerateParams()
-                nodes.extend(generate_nodes(last_selector, ToolType.INPUT_TEXT, params))
+                nodes.extend(_input_text_nodes(last_selector, last_path))
             pending_input = False
 
             try:
@@ -418,6 +489,7 @@ def run_series_mode(output: str) -> None:
                 ]
                 nodes.extend(new_nodes)
                 last_selector = sel
+                last_path = path_dicts
             except Exception:
                 logger.exception("Could not capture element at mouse position")
 
@@ -504,6 +576,12 @@ def run_record_mode(output: str) -> None:
             logger.info("--- Capture #%d ---", el_counter)
             logger.info("  %s%s", label, extra)
 
+            # Rank the selector (Playwright-codegen equivalent): minimal
+            # fields + uniqueness check + confidence. Falls back to the
+            # all-fields dump when ranking fails (e.g. UIA walk error).
+            ranked = _rank_captured(sel)
+            _log_ranked(ranked, sel)
+
             # Prompt for tool type.
             tool = _prompt_tool_type()
 
@@ -514,12 +592,8 @@ def run_record_mode(output: str) -> None:
             if tool.needs_duration:
                 params = GenerateParams(duration_ms=_prompt_duration())
 
-            # Generate nodes.
-            path_dicts = path_to_dicts(path) if path else []
-            new_nodes = [
-                FlowNode(tool=n.tool, args=n.args, full_path=path_dicts)
-                for n in generate_nodes(sel, tool, params)
-            ]
+            # Generate nodes (same shape as single mode).
+            new_nodes = _nodes_for_capture(sel, path, tool, params, ranked)
             for node in new_nodes:
                 logger.info(
                     "    -> %s: %s",
@@ -606,6 +680,22 @@ def _prompt_duration() -> int:
         logger.error("Must be a positive integer.")
 
 
+def _rank_captured(sel: BestSelector) -> RankedSelector | None:
+    """Rank a captured selector, returning ``None`` on failure.
+
+    Ranking walks the live desktop (uniqueness check) and can fail on
+    UIA hiccups — record mode must keep working then, using the
+    unranked all-fields selector instead.
+    """
+    try:
+        from smithy.windows.selector_rank import rank_best_selector
+
+        return rank_best_selector(sel)
+    except Exception:
+        logger.exception("Selector ranking failed — using unranked selector")
+        return None
+
+
 def _extra_info(sel: BestSelector) -> str:
     """Return extra info string for display (automation_id, class_name, etc.)."""
     if sel.automation_id is not None:
@@ -618,40 +708,6 @@ def _extra_info(sel: BestSelector) -> str:
 
 
 # ── File I/O helpers ─────────────────────────────────────────────────────────
-
-
-def _append_capture(output: str, record: CaptureRecord) -> None:
-    """Append a single :class:`CaptureRecord` to a JSON file.
-
-    Creates the file if it does not exist, or reads the existing
-    ``CaptureOutput``-shaped JSON and appends to it.
-
-    Args:
-        output: Path to the JSON file.
-        record: The capture record to append.
-    """
-    try:
-        with open(output, encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {"tool": "selector-capture", "captures": []}
-
-    data.setdefault("tool", "selector-capture")
-    data.setdefault("captures", [])
-
-    cap_dict: dict[str, Any] = {
-        "id": record.id,
-        "timestamp": record.timestamp,
-        "full_path": path_to_dicts(record.full_path),
-        "best_selector": record.best_selector.to_dict(),
-    }
-    if record.description is not None:
-        cap_dict["description"] = record.description
-
-    data["captures"].append(cap_dict)
-
-    with open(output, "w", encoding="utf-8") as fh:
-        json.dump(data, fh, indent=2, ensure_ascii=False)
 
 
 def _write_flow_output(output: str, nodes: list[FlowNode]) -> None:
