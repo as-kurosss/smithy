@@ -13,6 +13,7 @@ from smithy.core.http_queue import HttpQueue, HttpQueueError
 from smithy.core.queue import (
     ClaimedItem,
     InMemoryQueue,
+    LeaseRenewable,
     Queue,
     QueueInfo,
     QueueItem,
@@ -25,6 +26,7 @@ from smithy.core.transactions import (
     TransactionReport,
     current_transaction_id,
     run_transactions,
+    run_transactions_async,
 )
 from smithy.facade import ClickResult, ProcessHandle, Smithy
 
@@ -42,6 +44,7 @@ __all__ = [
     "InMemoryQueue",
     "InvalidInput",
     "ItemOutcome",
+    "LeaseRenewable",
     "PlatformError",
     "ProcessHandle",
     "Queue",
@@ -56,5 +59,6 @@ __all__ = [
     "TransactionReport",
     "current_transaction_id",
     "run_transactions",
+    "run_transactions_async",
     "tool",
 ]

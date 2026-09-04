@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from typing import Any
 
 import pytest
 
 from smithy.core.errors import BusinessError, Cancelled, InfrastructureError, InvalidInput
 from smithy.core.events import ToolEvent
-from smithy.core.queue import ClaimedItem, InMemoryQueue, Queue
+from smithy.core.queue import ClaimedItem, InMemoryQueue, LeaseRenewable, Queue
 from smithy.core.transactions import (
+    ItemOutcome,
     TransactionContextMiddleware,
     TransactionReport,
     current_transaction_id,
     run_transactions,
+    run_transactions_async,
 )
 
 RUN_ID = "run-1"
@@ -189,6 +193,160 @@ def test_invalid_budget_rejected(bad: Any) -> None:
             run_id=RUN_ID,
             stop_after_consecutive_system_errors=bad,
         )
+
+
+def test_heartbeat_keeps_slow_item_alive() -> None:
+    queue = _seeded(1)
+
+    def process(item: ClaimedItem) -> dict[str, Any] | None:
+        time.sleep(3)
+        return {"ok": True}
+
+    report = run_transactions(queue, process, queue_name="jobs", run_id=RUN_ID, lease_seconds=2)
+    assert report.succeeded == 1
+    assert report.heartbeat_active is True
+    assert report.lease_renewals >= 1
+
+
+def test_heartbeat_off_without_renewal_support() -> None:
+    inner = _seeded(1)
+
+    class _PlainQueue:
+        """Queue-shaped wrapper without ``renew_lease``."""
+
+        def get_or_create_queue(self, name: str, **kwargs: Any) -> Any:
+            return inner.get_or_create_queue(name, **kwargs)
+
+        def add(self, queue: str, payload: dict[str, Any], **kwargs: Any) -> Any:
+            return inner.add(queue, payload, **kwargs)
+
+        def claim(self, queue: str, **kwargs: Any) -> Any:
+            return inner.claim(queue, **kwargs)
+
+        def set_status(self, item_id: str, status: Any, **kwargs: Any) -> Any:
+            return inner.set_status(item_id, status, **kwargs)
+
+    plain = _PlainQueue()
+    assert not isinstance(plain, LeaseRenewable)
+    report = run_transactions(
+        plain,  # type: ignore[arg-type]
+        lambda item: None,
+        queue_name="jobs",
+        run_id=RUN_ID,
+    )
+    assert report.succeeded == 1
+    assert report.heartbeat_active is False
+    assert report.lease_renewals == 0
+
+
+def test_max_claim_seconds_caps_renewals() -> None:
+    queue = _seeded(1)
+
+    def process(item: ClaimedItem) -> dict[str, Any] | None:
+        time.sleep(4)
+        return None
+
+    report = run_transactions(
+        queue,
+        process,
+        queue_name="jobs",
+        run_id=RUN_ID,
+        lease_seconds=2,
+        max_claim_seconds=2,
+    )
+    assert report.succeeded == 1  # No rival claimant; ownership intact.
+    assert report.heartbeat_active is True
+    assert report.lease_renewals <= 2
+
+
+def test_ownership_lost_becomes_system_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    queue = _seeded(1)
+
+    def stolen(
+        item_id: str, status: Any, *, run_id: str, error: Any = None, result: Any = None
+    ) -> Any:
+        raise InvalidInput("not claimed by this run", param="run_id", input_value=run_id)
+
+    monkeypatch.setattr(queue, "set_status", stolen)
+    report = run_transactions(queue, lambda item: None, queue_name="jobs", run_id=RUN_ID)
+    assert report.system_failed == 1
+    assert report.outcomes[0].status == "system_failed"
+    assert any("OwnershipLost" in error for error in report.errors)
+
+
+def test_on_progress_called_per_item() -> None:
+    queue = _seeded(2)
+    seen: list[ItemOutcome] = []
+    report = run_transactions(
+        queue,
+        lambda item: None,
+        queue_name="jobs",
+        run_id=RUN_ID,
+        on_progress=seen.append,
+    )
+    assert [outcome.status for outcome in seen] == ["success", "success"]
+    assert seen == report.outcomes
+
+
+async def test_async_runner_happy_path() -> None:
+    queue = _seeded(2)
+
+    async def process(item: ClaimedItem) -> dict[str, Any] | None:
+        await asyncio.sleep(0)
+        return {"n": item.payload["n"]}
+
+    report = await run_transactions_async(queue, process, queue_name="jobs", run_id=RUN_ID)
+    assert (report.succeeded, report.processed) == (2, 2)
+    assert report.stop_reason == "queue_empty"
+
+
+async def test_async_runner_accepts_sync_callables() -> None:
+    queue = _seeded(2)
+    seen: list[ItemOutcome] = []
+    ended: list[TransactionReport] = []
+    report = await run_transactions_async(
+        queue,
+        lambda item: {"n": item.payload["n"]},
+        queue_name="jobs",
+        run_id=RUN_ID,
+        on_progress=seen.append,
+        on_end=ended.append,
+    )
+    assert report.succeeded == 2 and len(seen) == 2 and ended == [report]
+
+
+async def test_async_runner_splits_errors() -> None:
+    queue = _seeded(3)
+
+    async def process(item: ClaimedItem) -> dict[str, Any] | None:
+        if item.payload["n"] == 1:
+            raise BusinessError("bad row")
+        if item.payload["n"] == 2:
+            raise RuntimeError("host exploded")
+        return None
+
+    async def checker() -> bool:
+        return False
+
+    report = await run_transactions_async(
+        queue, process, queue_name="jobs", run_id=RUN_ID, stop_checker=checker
+    )
+    assert (report.succeeded, report.business_failed, report.system_failed) == (1, 1, 1)
+
+
+async def test_async_heartbeat_keeps_slow_item_alive() -> None:
+    queue = _seeded(1)
+
+    async def process(item: ClaimedItem) -> dict[str, Any] | None:
+        await asyncio.sleep(3)
+        return {"ok": True}
+
+    report = await run_transactions_async(
+        queue, process, queue_name="jobs", run_id=RUN_ID, lease_seconds=2
+    )
+    assert report.succeeded == 1
+    assert report.heartbeat_active is True
+    assert report.lease_renewals >= 1
 
 
 async def test_middleware_stamps_transaction_id() -> None:

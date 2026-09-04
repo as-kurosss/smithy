@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from smithy.core.errors import InvalidInput
-from smithy.core.queue import InMemoryQueue, Queue, SqliteQueue
+from smithy.core.queue import InMemoryQueue, LeaseRenewable, Queue, SqliteQueue
 
 RUN_ID = "run-1"
 OTHER_RUN = "run-2"
@@ -141,6 +141,51 @@ def test_set_status_unknown_item_raises_key_error(backend: Queue) -> None:
     backend.get_or_create_queue("jobs")
     with pytest.raises(KeyError):
         backend.set_status("missing", "success", run_id=RUN_ID)
+
+
+def test_renew_lease_extends_expiry(backend: Queue) -> None:
+    assert isinstance(backend, LeaseRenewable)
+    _seed(backend, "jobs", 1)
+    claimed = backend.claim("jobs", run_id=RUN_ID, lease_seconds=60)
+    assert claimed is not None
+    renewed = backend.renew_lease(claimed.id, run_id=RUN_ID, lease_seconds=120)
+    assert renewed > claimed.lease_expires_at
+
+
+def test_renew_lease_rejects_foreign_run(backend: Queue) -> None:
+    assert isinstance(backend, LeaseRenewable)
+    _seed(backend, "jobs", 1)
+    claimed = backend.claim("jobs", run_id=RUN_ID)
+    assert claimed is not None
+    with pytest.raises(InvalidInput):
+        backend.renew_lease(claimed.id, run_id=OTHER_RUN)
+
+
+def test_renew_lease_unknown_item_raises_key_error(backend: Queue) -> None:
+    assert isinstance(backend, LeaseRenewable)
+    backend.get_or_create_queue("jobs")
+    with pytest.raises(KeyError):
+        backend.renew_lease("missing", run_id=RUN_ID)
+
+
+@pytest.mark.parametrize("bad", [0, -2, True, "60"])
+def test_renew_lease_rejects_bad_lease(backend: Queue, bad: Any) -> None:
+    assert isinstance(backend, LeaseRenewable)
+    _seed(backend, "jobs", 1)
+    claimed = backend.claim("jobs", run_id=RUN_ID)
+    assert claimed is not None
+    with pytest.raises(InvalidInput):
+        backend.renew_lease(claimed.id, run_id=RUN_ID, lease_seconds=bad)
+
+
+def test_renew_expired_but_unclaimed_succeeds(backend: Queue) -> None:
+    assert isinstance(backend, LeaseRenewable)
+    _seed(backend, "jobs", 1)
+    claimed = backend.claim("jobs", run_id=RUN_ID, lease_seconds=1)
+    assert claimed is not None
+    time.sleep(1.2)
+    renewed = backend.renew_lease(claimed.id, run_id=RUN_ID, lease_seconds=60)
+    assert renewed.tzinfo is not None
 
 
 def test_expired_lease_returns_item_to_new(backend: Queue) -> None:

@@ -20,7 +20,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol, cast, runtime_checkable
 
 from smithy.core.errors import InvalidInput
 
@@ -94,6 +94,24 @@ class Queue(Protocol):
 
         *run_id* must own the claim — a stale writer gets ``InvalidInput``
         (HTTP ``409``), never silently overwrites another run.
+        """
+        ...
+
+
+@runtime_checkable
+class LeaseRenewable(Protocol):
+    """Optional queue capability: extend a claim's lease while work continues.
+
+    Backends without this method simply run without a heartbeat — the
+    runner checks support with ``isinstance(queue, LeaseRenewable)``.
+    """
+
+    def renew_lease(self, item_id: str, *, run_id: str, lease_seconds: int = 300) -> datetime:
+        """Push *lease_expires_at* forward; the claim must belong to *run_id*.
+
+        Raises ``KeyError`` for an unknown item and ``InvalidInput`` when
+        another run owns the claim. Renewing an expired-but-unclaimed lease
+        succeeds — the owner hasn't changed.
         """
         ...
 
@@ -225,6 +243,17 @@ class InMemoryQueue:
             record.error = error
             record.result = None if result is None else dict(result)
             return self._view(record)
+
+    def renew_lease(self, item_id: str, *, run_id: str, lease_seconds: int = 300) -> datetime:
+        _check_lease(lease_seconds)
+        now = _utcnow()
+        with self._lock:
+            record = self._items.get(item_id)
+            if record is None:
+                raise KeyError(f"Unknown queue item: {item_id!r}")
+            self._check_owner(record, run_id)
+            record.lease_expires_at = now + timedelta(seconds=lease_seconds)
+            return record.lease_expires_at
 
     # -- internals -----------------------------------------------------
 
@@ -412,6 +441,24 @@ class SqliteQueue:
                     (status, error, _dump_result(result), _utcnow().isoformat(), item_id),
                 )
             return self._view(self._get(item_id))
+
+    def renew_lease(self, item_id: str, *, run_id: str, lease_seconds: int = 300) -> datetime:
+        _check_lease(lease_seconds)
+        now = _utcnow()
+        with self._lock, self._conn:
+            row = self._get(item_id)
+            if str(row["status"]) != "in_progress" or row["run_id"] != run_id:
+                raise InvalidInput(
+                    f"Queue item {item_id!r} is not claimed by this run",
+                    param="run_id",
+                    input_value=run_id,
+                )
+            lease = now + timedelta(seconds=lease_seconds)
+            self._conn.execute(
+                "UPDATE items SET lease_expires_at = ?, updated_at = ? WHERE id = ?",
+                (lease.isoformat(), now.isoformat(), item_id),
+            )
+            return lease
 
     # -- internals -----------------------------------------------------
 

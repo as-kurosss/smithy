@@ -6,9 +6,13 @@ so these tests fail if the client drifts from the contract.
 
 from __future__ import annotations
 
+import io
 import json
 import threading
+import time
+import urllib.error
 import urllib.parse
+import urllib.request
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, cast
@@ -122,7 +126,25 @@ class _StubHandler(BaseHTTPRequestHandler):
     def do_PATCH(self) -> None:
         parts = [urllib.parse.unquote(p) for p in urllib.parse.urlparse(self.path).path.split("/")]
         body = self._read_json()
-        if len(parts) == 5 and parts[1] == "agents" and parts[3] == "queue-items":
+        if (
+            len(parts) == 6
+            and parts[1] == "agents"
+            and parts[3] == "queue-items"
+            and parts[5] == "heartbeat"
+        ):
+            backend = self._backend
+            try:
+                lease = backend.renew_lease(
+                    parts[4], run_id=str(body["run_id"]), lease_seconds=int(body["lease_seconds"])
+                )
+            except InvalidInput:
+                self._send(409, {"detail": "Not claimed by this run"})
+                return
+            except KeyError:
+                self._send(404, {"detail": "Item not found"})
+                return
+            self._send(200, {"id": parts[4], "lease_expires_at": lease.isoformat()})
+        elif len(parts) == 5 and parts[1] == "agents" and parts[3] == "queue-items":
             backend = self._backend
             try:
                 updated = backend.set_status(
@@ -233,9 +255,72 @@ def test_unknown_names_map_404_to_key_error(stub: tuple[str, InMemoryQueue]) -> 
 
 
 def test_connection_failure_maps_to_http_queue_error() -> None:
-    queue = HttpQueue("http://127.0.0.1:1", agent_id=AGENT_ID, token="secret")
+    queue = HttpQueue("http://127.0.0.1:1", agent_id=AGENT_ID, token="secret", max_retries=0)
     with pytest.raises(HttpQueueError):
         queue.claim("jobs", run_id=RUN_ID)
+
+
+def test_renew_lease_over_http(stub: tuple[str, InMemoryQueue]) -> None:
+    base_url, _ = stub
+    queue = _client(base_url)
+    queue.get_or_create_queue("jobs")
+    queue.add("jobs", {"n": 0})
+    claimed = queue.claim("jobs", run_id=RUN_ID, lease_seconds=60)
+    assert claimed is not None
+    renewed = queue.renew_lease(claimed.id, run_id=RUN_ID, lease_seconds=120)
+    assert renewed > claimed.lease_expires_at
+    with pytest.raises(InvalidInput):
+        queue.renew_lease(claimed.id, run_id="other-run")
+    with pytest.raises(KeyError):
+        queue.renew_lease("missing", run_id=RUN_ID)
+
+
+def test_transient_503_retried_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[int] = []
+    sleeps: list[float] = []
+
+    class _Resp:
+        def __enter__(self) -> _Resp:
+            return self
+
+        def __exit__(self, *args: Any) -> bool:
+            return False
+
+        def read(self) -> bytes:
+            return b'{"name": "jobs", "max_attempts": 3}'
+
+    def fake_urlopen(request: Any, timeout: Any = None) -> Any:
+        attempts.append(1)
+        if len(attempts) <= 2:
+            raise urllib.error.HTTPError(
+                str(request.full_url), 503, "unavailable", {}, io.BytesIO(b"busy")
+            )
+        return _Resp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    queue = _client("http://stub")
+    info = queue.get_or_create_queue("jobs")
+    assert (info.name, info.max_attempts) == ("jobs", 3)
+    assert len(attempts) == 3
+    assert sleeps == [0.5, 1.0]
+
+
+def test_meaningful_errors_never_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[int] = []
+    sleeps: list[float] = []
+
+    def fake_urlopen(request: Any, timeout: Any = None) -> Any:
+        attempts.append(1)
+        raise urllib.error.HTTPError(str(request.full_url), 404, "missing", {}, io.BytesIO(b"gone"))
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(time, "sleep", sleeps.append)
+    queue = _client("http://stub")
+    with pytest.raises(KeyError):
+        queue.set_status("missing", "success", run_id=RUN_ID)
+    assert len(attempts) == 1
+    assert sleeps == []
 
 
 @pytest.mark.parametrize(
@@ -246,6 +331,8 @@ def test_connection_failure_maps_to_http_queue_error() -> None:
         {"base_url": "http://x", "agent_id": AGENT_ID, "token": ""},
         {"base_url": "http://x", "agent_id": AGENT_ID, "token": "s", "timeout_seconds": 0},
         {"base_url": "http://x", "agent_id": AGENT_ID, "token": "s", "timeout_seconds": True},
+        {"base_url": "http://x", "agent_id": AGENT_ID, "token": "s", "max_retries": -1},
+        {"base_url": "http://x", "agent_id": AGENT_ID, "token": "s", "max_retries": True},
     ],
 )
 def test_constructor_validation(kwargs: dict[str, Any]) -> None:

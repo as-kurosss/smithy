@@ -5,6 +5,10 @@ mechanics live in the private :func:`_post` / :func:`_patch` helpers so a
 future transport (keep-alive, async) can replace them without touching the
 :class:`Queue` implementation.
 
+Reliability: every request has a timeout and is retried (exponential
+backoff) on connection-level failures and HTTP 502/503/504. Meaningful
+answers — 400/404/409/422 — are never retried.
+
 Note on auth: ``claim``/``set_status`` use the agent Bearer token, while
 ``get_or_create_queue``/``add`` require operator rights. Seed queues with an
 operator token (or pre-create them server-side); workers only claim.
@@ -13,6 +17,7 @@ operator token (or pre-create them server-side); workers only claim.
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -38,17 +43,33 @@ class HttpQueueError(InfrastructureError):
         self.status_code = status_code
 
 
-def _post(url: str, payload: dict[str, Any], *, token: str, timeout: float) -> Any:
+_RETRYABLE_STATUS: frozenset[int] = frozenset({502, 503, 504})
+_RETRY_BASE_SECONDS = 0.5
+
+
+def _post(
+    url: str, payload: dict[str, Any], *, token: str, timeout: float, max_retries: int
+) -> Any:
     """POST *payload* as JSON, return the decoded JSON body."""
-    return _request("POST", url, payload, token=token, timeout=timeout)
+    return _request("POST", url, payload, token=token, timeout=timeout, max_retries=max_retries)
 
 
-def _patch(url: str, payload: dict[str, Any], *, token: str, timeout: float) -> Any:
+def _patch(
+    url: str, payload: dict[str, Any], *, token: str, timeout: float, max_retries: int
+) -> Any:
     """PATCH *payload* as JSON, return the decoded JSON body."""
-    return _request("PATCH", url, payload, token=token, timeout=timeout)
+    return _request("PATCH", url, payload, token=token, timeout=timeout, max_retries=max_retries)
 
 
-def _request(method: str, url: str, payload: dict[str, Any], *, token: str, timeout: float) -> Any:
+def _request(
+    method: str,
+    url: str,
+    payload: dict[str, Any],
+    *,
+    token: str,
+    timeout: float,
+    max_retries: int,
+) -> Any:
     body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
         url,
@@ -59,21 +80,31 @@ def _request(method: str, url: str, payload: dict[str, Any], *, token: str, time
             "Authorization": f"Bearer {token}",
         },
     )
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise HttpQueueError(
-            f"{method} {url} failed with HTTP {exc.code}: {detail}",
-            status_code=exc.code,
-        ) from exc
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise HttpQueueError(f"{method} {url} failed: {exc}") from exc
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise HttpQueueError(f"{method} {url} returned invalid JSON: {exc}") from exc
+    attempt = 0
+    while True:
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            if exc.code in _RETRYABLE_STATUS and attempt < max_retries:
+                time.sleep(_RETRY_BASE_SECONDS * 2**attempt)
+                attempt += 1
+                continue
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise HttpQueueError(
+                f"{method} {url} failed with HTTP {exc.code}: {detail}",
+                status_code=exc.code,
+            ) from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            if attempt < max_retries:
+                time.sleep(_RETRY_BASE_SECONDS * 2**attempt)
+                attempt += 1
+                continue
+            raise HttpQueueError(f"{method} {url} failed: {exc}") from exc
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise HttpQueueError(f"{method} {url} returned invalid JSON: {exc}") from exc
 
 
 class HttpQueue:
@@ -90,6 +121,7 @@ class HttpQueue:
         agent_id: str,
         token: str,
         timeout_seconds: float = 30.0,
+        max_retries: int = 3,
     ) -> None:
         if not base_url or not isinstance(base_url, str):
             raise InvalidInput("base_url must be a non-empty string", param="base_url")
@@ -103,10 +135,15 @@ class HttpQueue:
             or timeout_seconds <= 0
         ):
             raise InvalidInput("timeout_seconds must be a positive number", param="timeout_seconds")
+        if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
+            raise InvalidInput(
+                "max_retries must be an int >= 0", param="max_retries", input_value=max_retries
+            )
         self._base_url = base_url.rstrip("/")
         self._agent_id = agent_id
         self._token = token
         self._timeout = float(timeout_seconds)
+        self._max_retries = max_retries
 
     def get_or_create_queue(self, name: str, *, max_attempts: int = 3) -> QueueInfo:
         data = _post(
@@ -114,6 +151,7 @@ class HttpQueue:
             {"name": name, "max_attempts": max_attempts},
             token=self._token,
             timeout=self._timeout,
+            max_retries=self._max_retries,
         )
         if not isinstance(data, dict):
             raise HttpQueueError(f"Expected a queue object, got {data!r}")
@@ -133,6 +171,7 @@ class HttpQueue:
                 {"items": [{"payload": payload, "idempotency_key": idempotency_key}]},
                 token=self._token,
                 timeout=self._timeout,
+                max_retries=self._max_retries,
             )
         except HttpQueueError as exc:
             raise _maybe_missing(exc, f"Unknown queue: {queue!r}") from exc
@@ -148,6 +187,7 @@ class HttpQueue:
                 {"run_id": run_id, "lease_seconds": lease_seconds},
                 token=self._token,
                 timeout=self._timeout,
+                max_retries=self._max_retries,
             )
         except HttpQueueError as exc:
             raise _maybe_missing(exc, f"Unknown queue: {queue!r}") from exc
@@ -179,6 +219,7 @@ class HttpQueue:
                 {"status": status, "run_id": run_id, "error": error, "result": result},
                 token=self._token,
                 timeout=self._timeout,
+                max_retries=self._max_retries,
             )
         except HttpQueueError as exc:
             if exc.status_code == 409:
@@ -191,6 +232,32 @@ class HttpQueue:
         if not isinstance(data, dict):
             raise HttpQueueError(f"Expected a queue-item object, got {data!r}")
         return _parse_item(str(data.get("queue", "")), data)
+
+    def renew_lease(self, item_id: str, *, run_id: str, lease_seconds: int = 300) -> datetime:
+        """Extend the claim lease; the claim must belong to *run_id*.
+
+        Requires the server heartbeat endpoint
+        (``PATCH /agents/{agent}/queue-items/{id}/heartbeat``).
+        """
+        try:
+            data = _patch(
+                f"{self._base_url}/agents/{self._agent_id}/queue-items/{item_id}/heartbeat",
+                {"run_id": run_id, "lease_seconds": lease_seconds},
+                token=self._token,
+                timeout=self._timeout,
+                max_retries=self._max_retries,
+            )
+        except HttpQueueError as exc:
+            if exc.status_code == 409:
+                raise InvalidInput(
+                    f"Queue item {item_id!r} is not claimed by this run",
+                    param="run_id",
+                    input_value=run_id,
+                ) from exc
+            raise _maybe_missing(exc, f"Unknown queue item: {item_id!r}") from exc
+        if not isinstance(data, dict) or "lease_expires_at" not in data:
+            raise HttpQueueError(f"Expected a heartbeat object, got {data!r}")
+        return _parse_time(data["lease_expires_at"])
 
 
 def _maybe_missing(exc: HttpQueueError, message: str) -> HttpQueueError | KeyError:
