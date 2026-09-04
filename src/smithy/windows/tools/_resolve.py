@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
 from smithy.core.errors import InvalidInput
@@ -43,6 +44,50 @@ def build_selector(config: dict[str, Any]) -> ElementSelector | None:
     if "pid" in config:
         selector = selector.with_pid(config["pid"])
     return selector
+
+
+async def resolve_point(config: dict[str, Any]) -> tuple[int, int] | None:
+    """Resolve screen coordinates from ``x``/``y`` fields or a UI element.
+
+    Explicit coordinates win over selector fields. Returns ``None`` when
+    the config carries neither — tools that can act on the current mouse
+    position (e.g. scroll) treat that as "right here".
+
+    Raises:
+        InvalidInput: If only one of ``x``/``y`` is an integer.
+    """
+    if "x" in config or "y" in config:
+        x = config.get("x")
+        y = config.get("y")
+        if (
+            isinstance(x, bool)
+            or not isinstance(x, int)
+            or isinstance(y, bool)
+            or not isinstance(y, int)
+        ):
+            raise InvalidInput(
+                "Invalid 'x'/'y': expected integers",
+                param="x",
+                input_value={"x": x, "y": y},
+            )
+        return (x, y)
+    element = await resolve_element(config)
+    if element is None:
+        return None
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, _element_center, element)
+
+
+def _element_center(element: Any) -> tuple[int, int]:
+    """Clickable point of *element*, falling back to the rect center."""
+    point: Any = None
+    with contextlib.suppress(Exception):
+        point = element.GetClickablePoint()
+    if point is not None:
+        with contextlib.suppress(TypeError, IndexError, ValueError):
+            return (int(point[0]), int(point[1]))
+    rect = element.BoundingRectangle
+    return ((rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2)
 
 
 async def resolve_element(config: dict[str, Any]) -> Any:

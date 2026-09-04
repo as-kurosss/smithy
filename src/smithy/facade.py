@@ -145,15 +145,25 @@ class Smithy:
     async def click(
         self,
         handle: _SupportsPid | None = None,
+        *,
+        button: str = "left",
+        clicks: int = 1,
+        x: int | None = None,
+        y: int | None = None,
         **kwargs: Any,
     ) -> ClickResult:
-        """Click a UI element.
+        """Click a UI element or screen coordinates.
 
         When *handle* is provided, the PID is forwarded to the click tool
         so it can narrow the UIA search scope automatically.
+        Coordinates win over selector fields when both are given.
 
         Args:
             handle: ProcessHandle to scope element search by PID.
+            button: Mouse button — ``"left"`` (default) or ``"right"``.
+            clicks: Click count — ``1`` (default) or ``2`` (double-click).
+            x: Screen X coordinate (with *y* clicks a raw point).
+            y: Screen Y coordinate (with *x* clicks a raw point).
             **kwargs: Selector fields (name, automation_id, etc.) or
                 "element" key for a pre-resolved element.
 
@@ -162,7 +172,12 @@ class Smithy:
         """
         if handle is not None:
             kwargs.setdefault("pid", handle.pid)
-        result = await self._execute("windows.click", kwargs)
+        config: dict[str, Any] = {"button": button, "clicks": clicks, **kwargs}
+        if x is not None:
+            config["x"] = x
+        if y is not None:
+            config["y"] = y
+        result = await self._execute("windows.click", config)
         return ClickResult(status=result.get("status", "clicked"))
 
     async def wait(
@@ -176,11 +191,12 @@ class Smithy:
         pid: int | None = None,
         timeout_ms: int = 10000,
         interval_ms: int = 500,
+        wait_for: str = "appear",
     ) -> bool:
-        """Wait for a UI element to appear.
+        """Wait for a UI element to appear or disappear.
 
         Polls the desktop for a matching element at *interval_ms*
-        until found or *timeout_ms* elapsed.
+        until the condition holds or *timeout_ms* elapsed.
 
         Args:
             handle: ProcessHandle to scope the search by PID.
@@ -191,9 +207,10 @@ class Smithy:
             pid: Process ID filter.
             timeout_ms: Maximum wait time in milliseconds.
             interval_ms: Polling interval in milliseconds.
+            wait_for: ``"appear"`` (default) or ``"disappear"``.
 
         Returns:
-            ``True`` if the element was found, ``False`` otherwise.
+            ``True`` if the condition held in time, ``False`` otherwise.
         """
         config: dict[str, Any] = {}
         if handle is not None:
@@ -210,6 +227,7 @@ class Smithy:
             config["pid"] = pid
         config["timeout_ms"] = timeout_ms
         config["interval_ms"] = interval_ms
+        config["wait_for"] = wait_for
         result = await self._execute("windows.wait", config)
         return bool(result)
 
@@ -347,6 +365,278 @@ class Smithy:
         if handle is not None:
             kwargs.setdefault("pid", handle.pid)
         out: dict[str, Any] = await self._execute("windows.get_element", kwargs)
+        return out
+
+    async def scroll(
+        self,
+        handle: _SupportsPid | None = None,
+        *,
+        direction: str = "down",
+        wheel_clicks: int = 3,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Scroll the wheel over a UI element or the focused window.
+
+        Args:
+            handle: ProcessHandle to scope element search by PID.
+            direction: Scroll direction — ``"up"`` or ``"down"`` (default).
+            wheel_clicks: Number of wheel notches.
+            **kwargs: Optional selector fields (name, automation_id, etc.).
+
+        Returns:
+            Dict with ``"status"`` and ``"direction"`` keys.
+        """
+        if handle is not None:
+            kwargs.setdefault("pid", handle.pid)
+        out: dict[str, Any] = await self._execute(
+            "windows.scroll",
+            {"direction": direction, "wheel_clicks": wheel_clicks, **kwargs},
+        )
+        return out
+
+    async def hover(
+        self,
+        handle: _SupportsPid | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Move the mouse over a UI element (opens tooltips/menus).
+
+        Args:
+            handle: ProcessHandle to scope element search by PID.
+            **kwargs: Selector fields (name, automation_id, etc.).
+
+        Returns:
+            Dict with ``"status"`` key.
+        """
+        if handle is not None:
+            kwargs.setdefault("pid", handle.pid)
+        out: dict[str, Any] = await self._execute("windows.hover", kwargs)
+        return out
+
+    async def exists(
+        self,
+        handle: _SupportsPid | None = None,
+        **kwargs: Any,
+    ) -> bool:
+        """Check whether a UI element exists right now.
+
+        Args:
+            handle: ProcessHandle to scope element search by PID.
+            **kwargs: Selector fields (name, automation_id, etc.).
+
+        Returns:
+            ``True`` if the element exists, ``False`` otherwise.
+        """
+        if handle is not None:
+            kwargs.setdefault("pid", handle.pid)
+        result = await self._execute("windows.exists", kwargs)
+        return bool(result)
+
+    async def get_text(
+        self,
+        handle: _SupportsPid | None = None,
+        **kwargs: Any,
+    ) -> str:
+        """Read the visible text of a UI element.
+
+        Args:
+            handle: ProcessHandle to scope element search by PID.
+            **kwargs: Selector fields (name, automation_id, etc.).
+
+        Returns:
+            Element text (empty string when unreadable).
+        """
+        if handle is not None:
+            kwargs.setdefault("pid", handle.pid)
+        result = await self._execute("windows.get_text", kwargs)
+        if isinstance(result, dict):
+            return str(result.get("text", ""))
+        return str(result)
+
+    async def window(
+        self,
+        handle: _SupportsPid | None = None,
+        *,
+        action: str,
+        pid: int | None = None,
+        x: int | None = None,
+        y: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> dict[str, Any]:
+        """Manage a top-level window by PID.
+
+        Pair ``action="activate"`` before clicks to fix the classic flake
+        where clicks miss because the window is not foreground.
+
+        Args:
+            handle: ProcessHandle owning the window.
+            action: ``"activate"``, ``"minimize"``, ``"maximize"``,
+                ``"restore"``, ``"move"``, or ``"close"``.
+            pid: Process ID (alternative to *handle*).
+            x: Left edge (``"move"`` only).
+            y: Top edge (``"move"`` only).
+            width: Width (``"move"`` only).
+            height: Height (``"move"`` only).
+
+        Returns:
+            Dict with ``"status"``, ``"action"``, and ``"pid"`` keys.
+        """
+        config: dict[str, Any] = {"action": action}
+        if handle is not None:
+            config["pid"] = handle.pid
+        elif pid is not None:
+            config["pid"] = pid
+        if x is not None:
+            config["x"] = x
+        if y is not None:
+            config["y"] = y
+        if width is not None:
+            config["width"] = width
+        if height is not None:
+            config["height"] = height
+        out: dict[str, Any] = await self._execute("windows.window", config)
+        return out
+
+    async def select(
+        self,
+        handle: _SupportsPid | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Select an item in a dropdown, combobox, or list.
+
+        Args:
+            handle: ProcessHandle to scope element search by PID.
+            **kwargs: Selector fields identifying the item (name, pid, …).
+
+        Returns:
+            Dict with ``"status"`` key.
+        """
+        if handle is not None:
+            kwargs.setdefault("pid", handle.pid)
+        out: dict[str, Any] = await self._execute("windows.select", kwargs)
+        return out
+
+    async def drag(
+        self,
+        handle: _SupportsPid | None = None,
+        *,
+        from_x: int | None = None,
+        from_y: int | None = None,
+        to_x: int | None = None,
+        to_y: int | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Drag from one UI point to another.
+
+        Each endpoint is either coordinates (``from_x``/``from_y``) or
+        selector fields with ``from_``/``to_`` prefixes (``from_name``,
+        ``to_name``, ``from_pid``, …). Both endpoints must resolve.
+
+        Args:
+            handle: ProcessHandle to scope element search by PID.
+            from_x: Start X coordinate.
+            from_y: Start Y coordinate.
+            to_x: End X coordinate.
+            to_y: End Y coordinate.
+            **kwargs: ``from_*``/``to_*`` selector fields.
+
+        Returns:
+            Dict with ``"status"``, ``"from"``, and ``"to"`` keys.
+        """
+        config: dict[str, Any] = dict(kwargs)
+        if handle is not None:
+            config.setdefault("from_pid", handle.pid)
+        if from_x is not None:
+            config["from_x"] = from_x
+        if from_y is not None:
+            config["from_y"] = from_y
+        if to_x is not None:
+            config["to_x"] = to_x
+        if to_y is not None:
+            config["to_y"] = to_y
+        out: dict[str, Any] = await self._execute("windows.drag", config)
+        return out
+
+    async def clipboard(
+        self,
+        *,
+        action: str,
+        text: str | None = None,
+    ) -> dict[str, Any] | str:
+        """Read or write the system clipboard text.
+
+        Requires ``pyperclip`` (included in ``smithy[windows]``).
+
+        Args:
+            action: ``"get"`` reads, ``"set"`` writes.
+            text: Text to put on the clipboard (``"set"`` only).
+
+        Returns:
+            Clipboard text for ``"get"``; dict with ``"status"`` for ``"set"``.
+        """
+        config: dict[str, Any] = {"action": action}
+        if text is not None:
+            config["text"] = text
+        result = await self._execute("windows.clipboard", config)
+        if action == "get":
+            if isinstance(result, dict):
+                return str(result.get("text", ""))
+            return str(result)
+        out: dict[str, Any] = result
+        return out
+
+    async def list_elements(
+        self,
+        handle: _SupportsPid | None = None,
+        *,
+        max_items: int = 50,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """List direct child elements of a window or container.
+
+        Use this to discover stable automation IDs before writing the bot.
+
+        Args:
+            handle: ProcessHandle to scope element search by PID.
+            max_items: Max children to return.
+            **kwargs: Selector fields for the parent element.
+
+        Returns:
+            Dict with ``"items"`` and ``"count"`` keys.
+        """
+        if handle is not None:
+            kwargs.setdefault("pid", handle.pid)
+        out: dict[str, Any] = await self._execute(
+            "windows.list_elements", {"max_items": max_items, **kwargs}
+        )
+        return out
+
+    async def highlight(
+        self,
+        handle: _SupportsPid | None = None,
+        *,
+        color: str = "red",
+        duration_ms: int = 1000,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """Flash a colored rectangle around an element for debugging.
+
+        Args:
+            handle: ProcessHandle to scope element search by PID.
+            color: ``"red"`` (default), ``"green"``, ``"blue"``, ``"yellow"``.
+            duration_ms: How long to show the rectangle.
+            **kwargs: Selector fields (name, automation_id, etc.).
+
+        Returns:
+            Dict with ``"status"`` and ``"color"`` keys.
+        """
+        if handle is not None:
+            kwargs.setdefault("pid", handle.pid)
+        out: dict[str, Any] = await self._execute(
+            "windows.highlight",
+            {"color": color, "duration_ms": duration_ms, **kwargs},
+        )
         return out
 
     async def call(self, name: str, **kwargs: Any) -> Any:

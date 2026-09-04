@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.3.0
+
+GUI batch: comfortable desktop automation on top of the 0.2.0 core.
+
+### Added
+
+- Ten new Windows tools: `windows.scroll` (wheel over element/point),
+  `windows.hover` (menus, tooltips), `windows.exists` (single-lookup
+  boolean), `windows.get_text` (ValuePattern → Name fallback),
+  `windows.window` (activate/minimize/maximize/restore/move/close by PID
+  via Win32), `windows.select` (dropdown/combobox/list via
+  SelectionItemPattern), `windows.drag` (two endpoints, coordinates or
+  `from_*`/`to_*` selectors), `windows.clipboard` (get/set via
+  `pyperclip`), `windows.list_elements` (direct-children dump for
+  discovering automation IDs), `windows.highlight` (colored rectangle
+  flash for debugging selectors).
+- `Smithy` facade methods for every new tool (`scroll`, `hover`,
+  `exists`, `get_text`, `window`, `select`, `drag`, `clipboard`,
+  `list_elements`, `highlight`), all accepting an optional `handle` for
+  PID scoping.
+- Shared `_resolve.py` helpers: `resolve_point` (coordinates win over
+  selectors) and `resolve_element`.
+
+### Changed
+
+- `windows.click` now takes `button` (left/right), `clicks` (1/2), and
+  `x`/`y` coordinate clicks (double right-click = two `RightClick`
+  calls; no module-level `DoubleClick` exists in `uiautomation`).
+- `windows.wait` now takes `wait_for` (`appear`/`disappear`) with a
+  symmetric poll loop; `PlatformError` mid-poll counts as still present.
+- `smithy[windows]` extra now includes `pyperclip` (clipboard support).
+
 ## 0.2.0
 
 First minor release: transactions, config, and hardening on top of the

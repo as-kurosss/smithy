@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "smithy-py"
-version = "0.2.0"
+version = "0.3.0"
 description = "Free Python RPA engine — create automation bots with simple API"
 readme = "README.md"
 license = "MIT"
@@ -13,7 +13,7 @@ authors = [{ name = "as-kurosss" }]
 dependencies = []
 
 [project.optional-dependencies]
-windows = ["uiautomation>=2.0.29", "mss>=9", "Pillow>=10"]
+windows = ["uiautomation>=2.0.29", "mss>=9", "Pillow>=10", "pyperclip>=1.8"]
 capture = ["pynput>=1.7", "pyperclip>=1.8"]
 all = [
     "uiautomation>=2.0.29",
@@ -53,5 +53,5 @@ python_version = "3.11"
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["pynput.*", "pyperclip", "mss", "PIL", "PIL.*"]
+module = ["pynput.*", "pyperclip", "mss", "PIL", "PIL.*", "uiautomation"]
 ignore_missing_imports = true

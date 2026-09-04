@@ -30,14 +30,24 @@ asyncio.run(main())
 ## Built-in Tools
 
 - **ProcessTool** (`windows.process`) — launch and stop Windows processes by name
-- **ClickTool** (`windows.click`) — click a UI element by selector or context key
-- **WaitTool** (`windows.wait`) — poll until a UI element appears (with timeout)
+- **ClickTool** (`windows.click`) — click a UI element or coordinates; `button` (left/right), `clicks` (1/2)
+- **WaitTool** (`windows.wait`) — poll until a UI element appears or disappears (`wait_for`, with timeout)
 - **DelayTool** (`windows.delay`) — pause execution for a fixed duration
 - **ScreenshotTool** (`windows.screenshot`) — capture the screen or a window to a file
 - **InputTextTool** (`windows.input_text`) — type plain text into a UI element
 - **KeyboardTool** (`windows.keyboard`) — send key combos and presses (e.g. `"[CTRL]S"`, `"[CTRL!]"`, `"[ENTER]"`)
 - **SetTextTool** (`windows.set_text`) — replace a UI element's text programmatically (ValuePattern / WM_SETTEXT)
 - **GetElementTool** (`windows.get_element`) — read a UI element's attributes as a dict
+- **ScrollTool** (`windows.scroll`) — scroll the wheel over an element or point (`direction`, `wheel_clicks`)
+- **HoverTool** (`windows.hover`) — move the mouse over an element (menus, tooltips)
+- **ExistsTool** (`windows.exists`) — single-lookup boolean check (no waiting, no raising)
+- **GetTextTool** (`windows.get_text`) — read an element's visible text (ValuePattern → Name)
+- **WindowTool** (`windows.window`) — activate/minimize/maximize/restore/move/close a window by PID
+- **SelectTool** (`windows.select`) — select an item in a dropdown, combobox, or list
+- **DragTool** (`windows.drag`) — drag between two endpoints (coordinates or `from_*`/`to_*` selectors)
+- **ClipboardTool** (`windows.clipboard`) — read/write clipboard text (needs `pyperclip`)
+- **ListElementsTool** (`windows.list_elements`) — list direct children to discover automation IDs
+- **HighlightTool** (`windows.highlight`) — flash a colored rectangle for debugging selectors
 
 All UI tools accept optional `pid` (or a `ProcessHandle`) to scope element search to a specific window.
 
@@ -207,14 +217,25 @@ src/smithy/
     ├── selector.py      — ElementSelector (UIA tree search)
     └── tools/
         ├── process.py          — ProcessTool
-        ├── click.py            — ClickTool
-        ├── wait.py             — WaitTool
+        ├── click.py            — ClickTool (button/clicks/coordinates)
+        ├── wait.py             — WaitTool (appear/disappear)
         ├── delay.py            — DelayTool
         ├── screenshot.py       — ScreenshotTool
         ├── input_text.py       — InputTextTool
+        ├── keyboard.py         — KeyboardTool
         ├── set_text.py         — SetTextTool
         ├── get_element.py      — GetElementTool
-        ├── _resolve.py         — Shared element resolution helper
+        ├── scroll.py           — ScrollTool
+        ├── hover.py            — HoverTool
+        ├── exists.py           — ExistsTool
+        ├── get_text.py         — GetTextTool
+        ├── window.py           — WindowTool
+        ├── select.py           — SelectTool
+        ├── drag.py             — DragTool
+        ├── clipboard.py        — ClipboardTool
+        ├── list_elements.py    — ListElementsTool
+        ├── highlight.py        — HighlightTool
+        ├── _resolve.py         — Shared element/point resolution helpers
         └── selector_capture/   — Dev tool for UI inspection
 ```
 

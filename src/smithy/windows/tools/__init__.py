@@ -30,14 +30,24 @@ def windows_tools(
             the ``SMITHY_ALLOWED_COMMANDS`` env override when set).
     """
     from smithy.windows.tools.click import ClickTool
+    from smithy.windows.tools.clipboard import ClipboardTool
     from smithy.windows.tools.delay import DelayTool
+    from smithy.windows.tools.drag import DragTool
+    from smithy.windows.tools.exists import ExistsTool
     from smithy.windows.tools.get_element import GetElementTool
+    from smithy.windows.tools.get_text import GetTextTool
+    from smithy.windows.tools.highlight import HighlightTool
+    from smithy.windows.tools.hover import HoverTool
     from smithy.windows.tools.input_text import InputTextTool
     from smithy.windows.tools.keyboard import KeyboardTool
+    from smithy.windows.tools.list_elements import ListElementsTool
     from smithy.windows.tools.process import ProcessTool
     from smithy.windows.tools.screenshot import ScreenshotTool
+    from smithy.windows.tools.scroll import ScrollTool
+    from smithy.windows.tools.select import SelectTool
     from smithy.windows.tools.set_text import SetTextTool
     from smithy.windows.tools.wait import WaitTool
+    from smithy.windows.tools.window import WindowTool
 
     return [
         ProcessTool(allowed_commands=allowed_commands),
@@ -49,4 +59,14 @@ def windows_tools(
         KeyboardTool(),
         SetTextTool(),
         GetElementTool(),
+        ScrollTool(),
+        HoverTool(),
+        ExistsTool(),
+        GetTextTool(),
+        WindowTool(),
+        SelectTool(),
+        DragTool(),
+        ClipboardTool(),
+        ListElementsTool(),
+        HighlightTool(),
     ]

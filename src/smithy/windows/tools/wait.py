@@ -1,4 +1,4 @@
-"""WaitTool — wait for a Windows UI element to appear."""
+"""WaitTool — wait for a Windows UI element to appear or disappear."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from smithy.windows.selector import ElementSelector, parse_control_type
 
 
 class WaitTool(AbstractTool):
-    """Wait for a UI element to appear by polling at a fixed interval."""
+    """Wait for a UI element to appear (or disappear) by polling."""
 
     @property
     def name(self) -> str:
@@ -57,6 +57,12 @@ class WaitTool(AbstractTool):
                     "minimum": 50,
                     "default": 500,
                 },
+                "wait_for": {
+                    "type": "string",
+                    "enum": ["appear", "disappear"],
+                    "default": "appear",
+                    "description": "Wait until the element appears or disappears",
+                },
             },
             "required": [],
         }
@@ -94,6 +100,14 @@ class WaitTool(AbstractTool):
                 input_value=timeout_ms,
             )
 
+        wait_for = config.get("wait_for", "appear")
+        if wait_for not in ("appear", "disappear"):
+            raise InvalidInput(
+                "Invalid 'wait_for': expected 'appear' or 'disappear'",
+                param="wait_for",
+                input_value=wait_for,
+            )
+
         if "control_type" in config:
             raw_ct = config["control_type"]
             if not isinstance(raw_ct, str) or parse_control_type(raw_ct) is None:
@@ -119,9 +133,15 @@ class WaitTool(AbstractTool):
         while True:
             try:
                 await asyncio.get_running_loop().run_in_executor(None, selector.find_from_desktop)
+                missing = False
+            except ElementNotFound:
+                missing = True
+            except PlatformError:
+                # Transient UIA hiccup — keep polling as if still present.
+                missing = False
+
+            if (wait_for == "disappear") == missing:
                 return True
-            except (ElementNotFound, PlatformError):
-                pass
 
             if asyncio.get_running_loop().time() >= deadline:
                 return False
