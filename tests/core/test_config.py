@@ -82,3 +82,48 @@ def test_to_dict_round_trip(tmp_path: Path) -> None:
     assert plain["robot"]["queue"] == "invoices"
     assert plain["assets"]["servers"] == ["a", "b"]
     assert isinstance(config, Config)
+
+
+def test_env_overlay_overrides_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    file = _write(tmp_path / "bot.toml", VALID)
+    monkeypatch.setenv("SMITHY_ROBOT__QUEUE", "cloud-queue")
+    config = load_config(file)
+    assert config.robot.queue == "cloud-queue"
+    # Untouched keys keep file values.
+    assert config.robot.name == "invoices"
+
+
+def test_env_overlay_types_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    file = _write(tmp_path / "bot.toml", VALID)
+    monkeypatch.setenv("SMITHY_RETRY__MAX_ATTEMPTS", "5")
+    monkeypatch.setenv("SMITHY_DEBUG", "true")
+    monkeypatch.setenv("SMITHY_ROBOT__NAME", "plain name with spaces")
+    config = load_config(file)
+    assert config.retry.max_attempts == 5
+    assert isinstance(config.retry.max_attempts, int)
+    assert config.debug is True
+    assert config.robot.name == "plain name with spaces"
+
+
+def test_env_overlay_satisfies_required(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    file = _write(tmp_path / "bot.toml", '[robot]\nname = "x"\n')
+    monkeypatch.setenv("SMITHY_ROBOT__QUEUE", "env-queue")
+    config = load_config(file, required=["robot.queue"])
+    assert config.robot.queue == "env-queue"
+
+
+def test_env_overlay_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    file = _write(tmp_path / "bot.toml", VALID)
+    monkeypatch.setenv("SMITHY_ROBOT__QUEUE", "cloud-queue")
+    config = load_config(file, env_prefix=None)
+    assert config.robot.queue == "invoices"
+
+
+def test_env_overlay_single_underscore_stays_literal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    file = _write(tmp_path / "bot.toml", VALID)
+    monkeypatch.setenv("SMITHY_ROBOT_NAME", "top-level")
+    config = load_config(file)
+    assert config["robot_name"] == "top-level"
+    assert config.robot.name == "invoices"

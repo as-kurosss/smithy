@@ -12,6 +12,7 @@ from smithy.core.errors import (
     ToolError,
 )
 from smithy.core.http_queue import HttpQueue, HttpQueueError
+from smithy.core.logging import JsonlEventLogger
 from smithy.core.queue import (
     ClaimedItem,
     InMemoryQueue,
@@ -21,6 +22,8 @@ from smithy.core.queue import (
     QueueItem,
     SqliteQueue,
 )
+from smithy.core.retry import RetryTool
+from smithy.core.schema import validate_against_schema
 from smithy.core.tool import AbstractTool, Tool, tool
 from smithy.core.transactions import (
     ItemOutcome,
@@ -32,7 +35,7 @@ from smithy.core.transactions import (
 )
 from smithy.facade import ClickResult, ProcessHandle, Smithy
 
-__version__ = "0.1.1"
+__version__ = "0.2.0"
 
 __all__ = [
     "AbstractTool",
@@ -48,12 +51,14 @@ __all__ = [
     "InMemoryQueue",
     "InvalidInput",
     "ItemOutcome",
+    "JsonlEventLogger",
     "LeaseRenewable",
     "PlatformError",
     "ProcessHandle",
     "Queue",
     "QueueInfo",
     "QueueItem",
+    "RetryTool",
     "Smithy",
     "SqliteQueue",
     "InfrastructureError",
@@ -66,4 +71,5 @@ __all__ = [
     "run_transactions",
     "run_transactions_async",
     "tool",
+    "validate_against_schema",
 ]

@@ -141,7 +141,7 @@ class ElementSelector:
         class_name = self.class_name
         pid = self.pid
 
-        ct_value = _parse_control_type(control_type) if control_type else None
+        ct_value = parse_control_type(control_type) if control_type else None
         use_wildcard = name is not None and _has_wildcard(name)
 
         def compare(ctrl: Any, depth: int) -> bool:
@@ -253,8 +253,12 @@ _CONTROL_TYPE_MAP: dict[str, int] = {
 }
 
 
-def _parse_control_type(s: str) -> int | None:
-    """Parse a control type string into its numeric UIA identifier."""
+def parse_control_type(s: str) -> int | None:
+    """Parse a control type string into its numeric UIA identifier.
+
+    Returns ``None`` for unknown names. Case-insensitive; ``"text"`` is
+    accepted as an alias for ``"edit"``.
+    """
     return _CONTROL_TYPE_MAP.get(s.lower())
 
 

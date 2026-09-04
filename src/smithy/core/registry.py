@@ -6,6 +6,7 @@ import warnings
 from typing import Any
 
 from smithy.core.errors import InvalidInput
+from smithy.core.schema import validate_against_schema
 from smithy.core.tool import Tool
 
 
@@ -47,9 +48,19 @@ class ToolRegistry:
     ) -> Any:
         """Execute a tool by name with JSON parameters.
 
+        The config is validated against the tool's ``schema()`` first;
+        violations raise ``InvalidInput`` without running the tool.
+
         Raises InvalidInput if the tool is not found.
         """
         tool = self.get(name)
         if tool is None:
             raise InvalidInput(f"Tool '{name}' not found")
+        problems = validate_against_schema(tool.schema(), config)
+        if problems:
+            raise InvalidInput(
+                f"Tool {name!r} rejected config: " + "; ".join(problems),
+                param=None,
+                input_value=config,
+            )
         return await tool.execute(config)

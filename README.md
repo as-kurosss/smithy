@@ -7,29 +7,9 @@ Free Python RPA engine — create automation bots with simple async API.
 ```python
 import asyncio
 from smithy import Smithy
-from smithy.windows.tools.process import ProcessTool
-from smithy.windows.tools.click import ClickTool
-from smithy.windows.tools.wait import WaitTool
-from smithy.windows.tools.delay import DelayTool
-from smithy.windows.tools.screenshot import ScreenshotTool
-from smithy.windows.tools.input_text import InputTextTool
-from smithy.windows.tools.keyboard import KeyboardTool
-from smithy.windows.tools.set_text import SetTextTool
-from smithy.windows.tools.get_element import GetElementTool
+from smithy.windows.tools import windows_tools
 
-bot = Smithy(
-    tools=[
-        ProcessTool(),
-        ClickTool(),
-        WaitTool(),
-        DelayTool(),
-        ScreenshotTool(),
-        InputTextTool(),
-        KeyboardTool(),
-        SetTextTool(),
-        GetElementTool(),
-    ]
-)
+bot = Smithy(tools=windows_tools())
 
 
 async def main() -> None:
@@ -61,6 +41,10 @@ asyncio.run(main())
 
 All UI tools accept optional `pid` (or a `ProcessHandle`) to scope element search to a specific window.
 
+`ProcessTool` only starts executables from its allowlist — pass
+`windows_tools(allowed_commands=["myapp.exe"])` or set
+`SMITHY_ALLOWED_COMMANDS="myapp.exe,other.exe"` to override the demo list.
+
 ## Custom Tools
 
 Create tools from simple async functions:
@@ -85,6 +69,62 @@ async def main() -> None:
 
 asyncio.run(main())
 ```
+
+## Transactions (REFramework-style)
+
+The framework owns the Init → Get → Process → SetStatus → End loop over a
+queue (local SQLite file or orchestrator via `HttpQueue`):
+
+```python
+import asyncio
+from smithy import InMemoryQueue, run_transactions_async
+from smithy.core.errors import BusinessError
+
+queue = InMemoryQueue()
+queue.get_or_create_queue("invoices", max_attempts=3)
+
+
+async def process(item) -> dict:
+    if not item.payload.get("number"):
+        raise BusinessError("invoice has no number")  # terminal, no retry
+    return {"posted": True}
+
+
+async def main() -> None:
+    report = await run_transactions_async(queue, "invoices", process)
+    print(report.processed, report.succeeded, report.business_failed)
+
+
+asyncio.run(main())
+```
+
+`BusinessError` marks an item terminally failed; `InfrastructureError` (or
+any unexpected exception) requeues it within the `max_attempts` budget;
+`Cancelled` stops the loop cooperatively. Long items get a background
+lease heartbeat (capped at 30 minutes). See
+[`examples/reframework_bot.py`](examples/reframework_bot.py) for a full
+dispatcher + performer skeleton.
+
+## Robot Config (TOML)
+
+One TOML per robot (replaces the two-column Excel sheet), validated up
+front — the bot fails in Init, never mid-run:
+
+```python
+from smithy import load_config
+
+CONFIG = load_config(
+    "reframework_bot.toml",
+    required=["robot.queue", "paths.workdir"],
+    must_exist=["paths.workdir"],
+)
+print(CONFIG.robot.queue)  # attribute access, frozen after load
+```
+
+Per-environment tweaks without editing TOML via `SMITHY_*` env vars:
+`SMITHY_ROBOT__QUEUE=invoices-prod` overrides `robot.queue` (`__` nests,
+values are TOML-typed). Secrets never live here — only references to
+orchestrator assets. See [`examples/config_demo.py`](examples/config_demo.py).
 
 ## Error Handling
 
@@ -152,7 +192,14 @@ src/smithy/
 ├── facade.py            — Smithy facade (async tool dispatch)
 ├── core/
 │   ├── tool.py          — Tool protocol, AbstractTool, @tool decorator
-│   ├── registry.py      — ToolRegistry (name → tool dispatch)
+│   ├── registry.py      — ToolRegistry (name → tool dispatch, schema validation)
+│   ├── schema.py        — Hand-rolled JSON Schema subset validator
+│   ├── retry.py         — RetryTool (attempts / delay / retry_on)
+│   ├── logging.py       — JsonlEventLogger (JSONL audit log middleware)
+│   ├── config.py        — TOML robot config + SMITHY_* env overlay
+│   ├── queue.py         — Queue protocol, InMemoryQueue, SqliteQueue
+│   ├── http_queue.py    — HttpQueue client for the orchestrator
+│   ├── transactions.py  — REFramework-style runner + heartbeat
 │   ├── events.py        — EventBus, ToolEvent, Middleware
 │   └── errors.py        — Error hierarchy (ToolError, ElementNotFound, etc.)
 └── windows/
@@ -175,6 +222,8 @@ src/smithy/
 
 - [`examples/basic_bot.py`](examples/basic_bot.py) — Launch Notepad and interact with its UI
 - [`examples/custom_tool.py`](examples/custom_tool.py) — Create and use custom tools
+- [`examples/reframework_bot.py`](examples/reframework_bot.py) — REFramework skeleton: dispatcher + performer over a queue
+- [`examples/config_demo.py`](examples/config_demo.py) — Load and validate a TOML robot config
 
 ## License
 

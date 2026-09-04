@@ -6,7 +6,7 @@ import asyncio
 from typing import Any
 
 from smithy.core.errors import InvalidInput
-from smithy.windows.selector import ElementSelector, _parse_control_type
+from smithy.windows.selector import ElementSelector, parse_control_type
 
 
 def build_selector(config: dict[str, Any]) -> ElementSelector | None:
@@ -25,7 +25,7 @@ def build_selector(config: dict[str, Any]) -> ElementSelector | None:
             )
     if "control_type" in config:
         raw_ct = config["control_type"]
-        if not isinstance(raw_ct, str) or _parse_control_type(raw_ct) is None:
+        if not isinstance(raw_ct, str) or parse_control_type(raw_ct) is None:
             raise InvalidInput(
                 f"Unknown control_type: {raw_ct!r}",
                 param="control_type",

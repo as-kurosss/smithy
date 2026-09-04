@@ -7,7 +7,7 @@ from typing import Any
 
 from smithy.core.errors import ElementNotFound, InvalidInput, PlatformError
 from smithy.core.tool import AbstractTool
-from smithy.windows.selector import ElementSelector, _parse_control_type
+from smithy.windows.selector import ElementSelector, parse_control_type
 
 
 class WaitTool(AbstractTool):
@@ -96,7 +96,7 @@ class WaitTool(AbstractTool):
 
         if "control_type" in config:
             raw_ct = config["control_type"]
-            if not isinstance(raw_ct, str) or _parse_control_type(raw_ct) is None:
+            if not isinstance(raw_ct, str) or parse_control_type(raw_ct) is None:
                 raise InvalidInput(
                     f"Unknown control_type: {raw_ct!r}",
                     param="control_type",

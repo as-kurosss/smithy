@@ -5,14 +5,20 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess
+from collections.abc import Iterable
 from typing import Any
 
 from smithy.core.errors import InvalidInput, PlatformError
 from smithy.core.tool import AbstractTool
 
-# Whitelist of allowed executables (case-insensitive).
+#: Env var with a comma-separated allowlist override, e.g.
+#: ``SMITHY_ALLOWED_COMMANDS="notepad.exe,calc.exe"``. An explicitly empty
+#: value denies everything.
+ENV_ALLOWLIST_VAR = "SMITHY_ALLOWED_COMMANDS"
+
+# Default allowlist of executables (case-insensitive).
 # cmd.exe and powershell.exe intentionally excluded (arbitrary command execution).
-_ALLOWED_COMMANDS: frozenset[str] = frozenset(
+_DEFAULT_ALLOWED_COMMANDS: frozenset[str] = frozenset(
     {
         "notepad.exe",
         "calc.exe",
@@ -24,13 +30,43 @@ _ALLOWED_COMMANDS: frozenset[str] = frozenset(
 )
 
 
-def _is_command_allowed(cmd: str) -> bool:
+def _normalize_entries(entries: Iterable[str]) -> frozenset[str]:
+    """Normalize allowlist entries to lowercase basenames."""
+    return frozenset(os.path.basename(entry.strip()).lower() for entry in entries if entry.strip())
+
+
+def _default_allowed_commands() -> frozenset[str]:
+    """Default allowlist, overridden by ``SMITHY_ALLOWED_COMMANDS`` when set."""
+    raw = os.environ.get(ENV_ALLOWLIST_VAR)
+    if raw is None:
+        return _DEFAULT_ALLOWED_COMMANDS
+    return _normalize_entries(raw.split(","))
+
+
+def _is_command_allowed(cmd: str, allowed: frozenset[str]) -> bool:
     """Check if the executable is in the allowlist."""
-    return os.path.basename(cmd).lower() in _ALLOWED_COMMANDS
+    return os.path.basename(cmd).lower() in allowed
 
 
 class ProcessTool(AbstractTool):
-    """Manage Windows processes: start or stop."""
+    """Manage Windows processes: start or stop.
+
+    Args:
+        allowed_commands: Executables this instance may start. Defaults to
+            the built-in demo list, overridden by the
+            ``SMITHY_ALLOWED_COMMANDS`` env var (comma-separated) when set.
+    """
+
+    def __init__(self, allowed_commands: Iterable[str] | None = None) -> None:
+        if allowed_commands is None:
+            self._allowed = _default_allowed_commands()
+        else:
+            self._allowed = _normalize_entries(allowed_commands)
+
+    @property
+    def allowed_commands(self) -> frozenset[str]:
+        """Executables this instance may start (lowercase basenames)."""
+        return self._allowed
 
     @property
     def name(self) -> str:
@@ -72,7 +108,7 @@ class ProcessTool(AbstractTool):
 
         try:
             if action == "start":
-                return await _action_start(config)
+                return await _action_start(config, self._allowed)
             if action == "stop":
                 return await _action_stop(config)
         except (InvalidInput, PlatformError):
@@ -90,7 +126,10 @@ class ProcessTool(AbstractTool):
         )
 
 
-async def _action_start(config: dict[str, Any]) -> dict[str, Any]:
+async def _action_start(
+    config: dict[str, Any],
+    allowed: frozenset[str],
+) -> dict[str, Any]:
     """Start a new process."""
     command = config.get("command")
     if not isinstance(command, str) or not command:
@@ -100,7 +139,7 @@ async def _action_start(config: dict[str, Any]) -> dict[str, Any]:
             input_value=command,
         )
 
-    if not _is_command_allowed(command):
+    if not _is_command_allowed(command, allowed):
         raise InvalidInput(
             f"Command '{command}' is not in the allowed list",
             param="command",

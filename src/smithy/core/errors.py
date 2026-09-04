@@ -103,21 +103,3 @@ class ConfigError(InvalidInput):
     Raised once with every problem listed — the robot must not start
     with a half-valid config.
     """
-
-
-class SmithError(Exception):
-    """General-purpose error for the Smith framework.
-
-    Bridges typed tool errors with the orchestrator layer.
-    """
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-
-
-class InvalidParams(SmithError):
-    """Invalid parameters."""
-
-
-class ContextError(SmithError):
-    """Context-related error."""

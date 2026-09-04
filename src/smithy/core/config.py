@@ -8,6 +8,7 @@ orchestrator assets (names, GUIDs); values are fetched at runtime.
 
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -79,11 +80,52 @@ def _lookup(config: Config, dotted: str) -> Any:
     return current
 
 
+def _parse_env_value(raw: str) -> Any:
+    """Interpret an env value with TOML scalar syntax; fall back to string.
+
+    ``"8080"`` becomes ``8080``, ``"true"`` becomes ``True``,
+    ``"C:\\temp"`` (not valid TOML) stays a plain string.
+    """
+    try:
+        return tomllib.loads(f"value = {raw}")["value"]
+    except ValueError:
+        return raw
+
+
+def _deep_set(document: dict[str, Any], parts: list[str], value: Any) -> None:
+    """Set a nested key, creating intermediate tables as needed."""
+    current = document
+    for part in parts[:-1]:
+        child = current.get(part)
+        if not isinstance(child, dict):
+            child = {}
+            current[part] = child
+        current = child
+    current[parts[-1]] = value
+
+
+def _apply_env_overlay(document: dict[str, Any], prefix: str) -> None:
+    """Overlay ``<prefix>*`` env vars onto the TOML document (in place).
+
+    ``SMITHY_ROBOT__QUEUE`` sets ``robot.queue``; double underscore nests,
+    single underscores stay literal (``SMITHY_ROBOT_NAME`` → ``robot_name``).
+    Values are typed with TOML scalar syntax (ints, bools, quoted strings).
+    """
+    for name, raw in os.environ.items():
+        if not name.startswith(prefix):
+            continue
+        rest = name[len(prefix) :].lower()
+        if not rest:
+            continue
+        _deep_set(document, rest.split("__"), _parse_env_value(raw))
+
+
 def load_config(
     path: str | Path,
     *,
     required: tuple[str, ...] | list[str] = (),
     must_exist: tuple[str, ...] | list[str] = (),
+    env_prefix: str | None = "SMITHY_",
 ) -> Config:
     """Load *path* as TOML and validate it.
 
@@ -91,6 +133,12 @@ def load_config(
     the robot fails in Init, never mid-run. *required* are dotted keys
     that must be present (``\"robot.queue\"``); *must_exist* are dotted
     keys whose values must be existing filesystem paths.
+
+    When *env_prefix* is set (default ``\"SMITHY_\"``), matching env vars
+    override file values — per-environment tweaks without editing TOML.
+    ``SMITHY_ROBOT__QUEUE`` sets ``robot.queue`` (``__`` nests, values are
+    TOML-typed). Checks run *after* the overlay, so env can satisfy
+    *required*. Pass ``env_prefix=None`` to disable.
     """
     file = Path(path)
     try:
@@ -101,6 +149,8 @@ def load_config(
         document = tomllib.loads(raw.decode("utf-8"))
     except ValueError as exc:
         raise ConfigError(f"Invalid TOML in {file}: {exc}", input_value=str(file)) from exc
+    if env_prefix:
+        _apply_env_overlay(document, env_prefix)
     frozen = _freeze(document)
     assert isinstance(frozen, Config)
     problems: list[str] = []

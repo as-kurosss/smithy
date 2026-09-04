@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from smithy.core.errors import ElementNotFound, InvalidInput, PlatformError
-from smithy.windows.selector import ElementSelector, _parse_control_type
+from smithy.windows.selector import ElementSelector, parse_control_type
 
 
 class TestElementSelector:
@@ -72,23 +72,23 @@ class TestElementSelector:
 
 class TestParseControlType:
     def test_button(self) -> None:
-        assert _parse_control_type("Button") == 50000
+        assert parse_control_type("Button") == 50000
 
     def test_edit(self) -> None:
-        assert _parse_control_type("Edit") == 50004
+        assert parse_control_type("Edit") == 50004
 
     def test_text_alias(self) -> None:
-        assert _parse_control_type("Text") == 50004
+        assert parse_control_type("Text") == 50004
 
     def test_window(self) -> None:
-        assert _parse_control_type("Window") == 50031
+        assert parse_control_type("Window") == 50031
 
     def test_case_insensitive(self) -> None:
-        assert _parse_control_type("button") == 50000
-        assert _parse_control_type("BUTTON") == 50000
+        assert parse_control_type("button") == 50000
+        assert parse_control_type("BUTTON") == 50000
 
     def test_unknown_returns_none(self) -> None:
-        assert _parse_control_type("NoSuchType") is None
+        assert parse_control_type("NoSuchType") is None
 
 
 class TestProcessTool:
