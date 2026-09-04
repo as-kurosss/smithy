@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0
+
+Playwright-style codegen: recorded flows render as runnable bot scripts.
+
+### Added
+
+- Code generation (`windows/tools/selector_capture/emit.py`): any
+  capture file (`single`/`series`/`record` — same `nodes` shape)
+  renders as a `Smithy(tools=windows_tools())` script with one
+  `await bot.*` call per node. New `emit` CLI subcommand
+  (`emit -i flow.json -o bot.py [--clip]`) plus `--emit BOT.py` on
+  every record mode for one-pass record-to-code.
+- Honest placeholders instead of silent gaps: a `TODO` header for the
+  unseen app launch (`process_run` + PID scoping), `text="TODO: fill
+  in"` for series-mode `input_text` (keys are never captured), and
+  `WARNING` comments from static selector-fragility scoring.
+
 ## 0.4.1
 
 Unified capture output: every recorder mode writes the same flow shape.

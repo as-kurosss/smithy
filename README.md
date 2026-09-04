@@ -197,6 +197,25 @@ and anchors. Note: series mode records click targets with full paths,
 but keyboard input captures only the target element, not the typed text
 itself — fill in `text` afterwards or use record mode.
 
+## Codegen (Playwright-style code recording)
+
+Any capture file renders as a replayable bot script — record once, get
+runnable code:
+
+```bash
+python -m smithy.windows.tools.selector_capture emit -i flow.json -o bot.py
+
+# ...or in one pass, straight from recording:
+python -m smithy.windows.tools.selector_capture record -o flow.json --emit bot.py
+```
+
+The script uses `Smithy(tools=windows_tools())` with one `await bot.*`
+call per node. No magic: the recorder never sees the launched process
+(so there's a `TODO` showing `process_run` + PID scoping), uncaptured
+`input_text` gets an explicit `text="TODO: fill in"` placeholder, and
+fragile selectors ship with `WARNING` comments. Open `bot.py` in your
+editor, fill in the TODOs, run.
+
 ## Install
 
 ```bash
@@ -268,7 +287,7 @@ src/smithy/
         ├── list_elements.py    — ListElementsTool
         ├── highlight.py        — HighlightTool
         ├── _resolve.py         — Shared element/point resolution helpers
-        └── selector_capture/   — Dev tool for UI inspection
+        └── selector_capture/   — Dev tool for UI inspection + codegen
 ```
 
 ## Examples
