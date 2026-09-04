@@ -1,0 +1,3 @@
+# Demo config — deliberately broken: no queue, no retry section.
+[robot]
+name = "invoices"

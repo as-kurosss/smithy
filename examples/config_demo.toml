@@ -1,0 +1,18 @@
+# Demo config — everything present and valid.
+# Secrets never live here, only references to orchestrator assets.
+
+[robot]
+name = "invoices"
+queue = "invoices"
+run_id = "local-run-1"
+
+[retry]
+max_attempts = 3
+
+[paths]
+workdir = "./work"
+archive = "./archive"
+
+[assets]
+erp_password = "00000000-0000-0000-0000-000000000000"
+servers = ["app-1", "app-2"]
