@@ -1,0 +1,14 @@
+# Robot config — edited by developers, validated on load (fail fast in Init).
+# Secrets never live here, only references to orchestrator assets.
+
+[robot]
+name = "invoices"
+queue = "invoices"
+run_id = "local-run-1"
+
+[retry]
+max_attempts = 3
+
+[assets]
+# GUIDs (or names) of orchestrator assets; values are fetched at runtime.
+erp_password = "00000000-0000-0000-0000-000000000000"

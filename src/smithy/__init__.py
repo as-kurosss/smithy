@@ -1,8 +1,10 @@
 """Smithy — Free Python RPA engine for creating automation bots."""
 
+from smithy.core.config import Config, load_config
 from smithy.core.errors import (
     BusinessError,
     Cancelled,
+    ConfigError,
     ElementNotFound,
     InfrastructureError,
     InvalidInput,
@@ -38,6 +40,8 @@ __all__ = [
     "Cancelled",
     "ClaimedItem",
     "ClickResult",
+    "Config",
+    "ConfigError",
     "ElementNotFound",
     "HttpQueue",
     "HttpQueueError",
@@ -58,6 +62,7 @@ __all__ = [
     "TransactionContextMiddleware",
     "TransactionReport",
     "current_transaction_id",
+    "load_config",
     "run_transactions",
     "run_transactions_async",
     "tool",

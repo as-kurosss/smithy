@@ -97,6 +97,14 @@ class InfrastructureError(ToolError):
     """
 
 
+class ConfigError(InvalidInput):
+    """Robot config is missing, unreadable, or fails validation.
+
+    Raised once with every problem listed — the robot must not start
+    with a half-valid config.
+    """
+
+
 class SmithError(Exception):
     """General-purpose error for the Smith framework.
 
