@@ -13,6 +13,8 @@ class ToolError(Exception):
         ElementNotFound — UI element not found or inaccessible.
         Cancelled — operation cancelled by user or authority.
         PlatformError — platform or UIA error with underlying cause.
+        BusinessError — transaction data is invalid, retry is pointless.
+        InfrastructureError — infrastructure failure, retry may help.
     """
 
     def __init__(self, message: str) -> None:
@@ -76,6 +78,23 @@ class PlatformError(ToolError):
         super().__init__(message)
         self.source = source
         self.input_value = input_value
+
+
+class BusinessError(ToolError):
+    """Transaction data is invalid — retrying the same payload is pointless.
+
+    Raised by ``process_fn`` inside the transaction runner to mark the
+    item as ``business_failed`` (terminal, no requeue).
+    """
+
+
+class InfrastructureError(ToolError):
+    """Infrastructure failure — retrying may help.
+
+    Raised by ``process_fn`` (or produced by the runner from unexpected
+    exceptions) to mark the item as ``system_failed`` (requeued until
+    the queue's ``max_attempts`` budget is exhausted).
+    """
 
 
 class SmithError(Exception):
